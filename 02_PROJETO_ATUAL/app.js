@@ -20,7 +20,7 @@
     PAGE_SIZE: 1000
   });
 
-  const APP_VERSION_FALLBACK = "20260815-pointer-region1";
+  const APP_VERSION_FALLBACK = "20260815-search-boundary1";
   const APP_VERSION = getCurrentAppVersion();
   const VERSION_CHECK = Object.freeze({
     URL: "./version.json",
@@ -50,6 +50,24 @@
   const POINT_NAVIGATION = Object.freeze({
     DESKTOP_INDIVIDUAL_ZOOM: 15,
     MOBILE_INDIVIDUAL_ZOOM: 16
+  });
+
+  const TERRITORY = Object.freeze({
+    MALHAS_URL: "https://servicodados.ibge.gov.br/api/v3/malhas",
+    LOCALIDADES_URL: "https://servicodados.ibge.gov.br/api/v1/localidades",
+    GEOJSON_FORMAT: "application/vnd.geo+json",
+    QUALITY: "intermediaria",
+    STATE_MAX_ZOOM: 8,
+    CITY_MAX_ZOOM: 13
+  });
+
+  const SEARCH_LIMITS = Object.freeze({
+    TOTAL: 12,
+    STATES: 3,
+    CITIES: 4,
+    DISTRICTS: 3,
+    STREETS: 3,
+    CLIENTS: 5
   });
 
   const HEAT_STYLE = Object.freeze({
@@ -163,6 +181,36 @@
     TO: "Tocantins"
   });
 
+  const IBGE_UF_CODES = Object.freeze({
+    AC: "12",
+    AL: "27",
+    AP: "16",
+    AM: "13",
+    BA: "29",
+    CE: "23",
+    DF: "53",
+    ES: "32",
+    GO: "52",
+    MA: "21",
+    MT: "51",
+    MS: "50",
+    MG: "31",
+    PA: "15",
+    PB: "25",
+    PR: "41",
+    PE: "26",
+    PI: "22",
+    RJ: "33",
+    RN: "24",
+    RS: "43",
+    RO: "11",
+    RR: "14",
+    SC: "42",
+    SP: "35",
+    SE: "28",
+    TO: "17"
+  });
+
   const OPENFREEMAP_ATTRIBUTION =
     '<a href="https://openfreemap.org/" target="_blank" rel="noopener">OpenFreeMap</a> &copy; <a href="https://openmaptiles.org/" target="_blank" rel="noopener">OpenMapTiles</a> Data from <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">OpenStreetMap</a>';
 
@@ -199,6 +247,7 @@
     filteredClients: [],
     markerLayer: null,
     heatLayer: null,
+    territoryLayer: null,
     heatPoints: [],
     selectedLayer: null,
     baseLayers: {},
@@ -208,6 +257,8 @@
     selectedClient: null,
     searchQuery: "",
     searchFocusClientId: "",
+    searchIntentOverride: null,
+    searchSuggestions: [],
     searchResultIndex: -1,
     lastSearchFitKey: "",
     viewMode: "markers",
@@ -223,6 +274,10 @@
     regionTimer: null,
     regionTargetLatLng: null,
     regionTargetSource: "center",
+    municipalityCatalog: null,
+    territoryCache: new Map(),
+    activeTerritoryKey: "",
+    territoryRequestKey: "",
     updateCheckTimer: null,
     updateReloading: false,
     heatAnimationFrame: null,
@@ -446,6 +501,10 @@
     }
 
     state.selectedLayer = L.layerGroup().addTo(state.map);
+    state.territoryLayer = L.geoJSON(null, {
+      interactive: false,
+      style: getTerritoryStyle
+    }).addTo(state.map);
 
     state.map.on("click", (event) => {
       setRegionTarget(event.latlng, getClickRegionSource());
@@ -539,6 +598,8 @@
       dom.searchInput.value = "";
       state.searchQuery = "";
       state.searchFocusClientId = "";
+      state.searchIntentOverride = null;
+      state.searchSuggestions = [];
       state.searchResultIndex = -1;
       state.lastSearchFitKey = "";
       dom.clearSearch.classList.add("is-hidden");
@@ -1627,6 +1688,8 @@
     const lookupQuery = normalizeLookupText(query);
     if (!lookupQuery) return null;
 
+    if (state.searchIntentOverride) return state.searchIntentOverride;
+
     if (state.searchFocusClientId) {
       const client = state.clients.find((item) => item.id === state.searchFocusClientId);
       if (client) return { type: "client", client };
@@ -1832,7 +1895,192 @@
     renderReport();
     updateRegionReadout();
 
-    if (fit) fitFilteredClients(searchIntent);
+    const territoryHandled = syncTerritoryLayer(searchIntent, { fit });
+
+    if (fit && !territoryHandled) {
+      fitFilteredClients(searchIntent);
+    }
+  }
+
+  function syncTerritoryLayer(searchIntent, { fit = false } = {}) {
+    if (!isTerritoryIntent(searchIntent)) {
+      clearTerritoryLayer();
+      return false;
+    }
+
+    loadAndRenderTerritory(searchIntent, { fit });
+    return true;
+  }
+
+  function isTerritoryIntent(intent) {
+    return Boolean(
+      intent &&
+      (intent.type === "state" || (intent.type === "city" && intent.uf))
+    );
+  }
+
+  async function loadAndRenderTerritory(intent, { fit = false } = {}) {
+    const key = getTerritoryKey(intent);
+    if (!key) {
+      clearTerritoryLayer();
+      if (fit) fitFilteredClients(intent);
+      return;
+    }
+
+    state.territoryRequestKey = key;
+
+    try {
+      const cached = state.territoryCache.get(key);
+      const payload = cached || await fetchTerritoryGeoJson(intent);
+
+      if (!payload || state.territoryRequestKey !== key) return;
+      state.territoryCache.set(key, payload);
+      renderTerritoryGeoJson(payload.geojson, payload.label, intent, { fit });
+    } catch (error) {
+      console.warn("[Mapa de clientes] Falha ao carregar limite territorial:", error);
+      clearTerritoryLayer();
+      if (fit) fitFilteredClients(intent);
+      showToast("Limite territorial IBGE indisponivel agora. Usando pontos dos clientes.");
+    }
+  }
+
+  async function fetchTerritoryGeoJson(intent) {
+    if (intent.type === "state") {
+      const code = IBGE_UF_CODES[intent.uf];
+      if (!code) return null;
+
+      return {
+        label: formatStateLabel(intent.uf),
+        geojson: await fetchJsonNoStore(buildIbgeMalhaUrl("estados", code))
+      };
+    }
+
+    if (intent.type === "city") {
+      const municipality = await findMunicipalityCatalogEntry(intent);
+      if (!municipality?.id) return null;
+
+      return {
+        label: `${municipality.nome} - ${municipality.uf}`,
+        geojson: await fetchJsonNoStore(buildIbgeMalhaUrl("municipios", municipality.id))
+      };
+    }
+
+    return null;
+  }
+
+  function buildIbgeMalhaUrl(level, id) {
+    const url = new URL(`${TERRITORY.MALHAS_URL}/${level}/${id}`);
+    url.searchParams.set("formato", TERRITORY.GEOJSON_FORMAT);
+    url.searchParams.set("qualidade", TERRITORY.QUALITY);
+    return url.toString();
+  }
+
+  async function findMunicipalityCatalogEntry(intent) {
+    const catalog = await getMunicipalityCatalog();
+    const city = normalizeLookupText(intent.cityName || intent.city);
+    const uf = cleanValue(intent.uf).toUpperCase();
+
+    return catalog.find(
+      (item) => item.uf === uf && normalizeLookupText(item.nome) === city
+    ) || null;
+  }
+
+  async function getMunicipalityCatalog() {
+    if (state.municipalityCatalog) return state.municipalityCatalog;
+
+    const rows = await fetchJsonNoStore(`${TERRITORY.LOCALIDADES_URL}/municipios`);
+    state.municipalityCatalog = rows.map((item) => ({
+      id: item.id,
+      nome: item.nome,
+      uf: item.microrregiao?.mesorregiao?.UF?.sigla || ""
+    }));
+
+    return state.municipalityCatalog;
+  }
+
+  async function fetchJsonNoStore(url) {
+    const response = await fetch(`${url}${url.includes("?") ? "&" : "?"}_=${Date.now()}`, {
+      cache: "no-store",
+      headers: {
+        Accept: "application/vnd.geo+json, application/json",
+        "Cache-Control": "no-cache",
+        Pragma: "no-cache"
+      }
+    });
+
+    if (!response.ok) {
+      throw new Error(`HTTP ${response.status}`);
+    }
+
+    return response.json();
+  }
+
+  function renderTerritoryGeoJson(geojson, label, intent, { fit = false } = {}) {
+    if (!state.territoryLayer || !geojson) return;
+
+    state.territoryLayer.clearLayers();
+    state.territoryLayer.addData(geojson);
+    state.activeTerritoryKey = getTerritoryKey(intent);
+
+    if (typeof state.territoryLayer.bringToBack === "function") {
+      state.territoryLayer.bringToBack();
+    }
+
+    if (fit) {
+      fitTerritoryLayer(intent);
+    }
+
+    if (label) {
+      showToast(`Limite IBGE: ${label}`);
+    }
+  }
+
+  function fitTerritoryLayer(intent) {
+    if (!state.map || !state.territoryLayer) return;
+
+    const bounds = state.territoryLayer.getBounds();
+    if (!bounds?.isValid?.()) {
+      fitFilteredClients(intent);
+      return;
+    }
+
+    state.map.fitBounds(bounds, {
+      paddingTopLeft: [34, 150],
+      paddingBottomRight: [34, 48],
+      maxZoom: intent.type === "state"
+        ? TERRITORY.STATE_MAX_ZOOM
+        : TERRITORY.CITY_MAX_ZOOM,
+      animate: !prefersReducedMotion(),
+      duration: 0.56
+    });
+  }
+
+  function clearTerritoryLayer() {
+    state.activeTerritoryKey = "";
+    state.territoryRequestKey = "";
+    state.territoryLayer?.clearLayers();
+  }
+
+  function getTerritoryKey(intent) {
+    if (!intent) return "";
+    if (intent.type === "state") return `state:${intent.uf}`;
+    if (intent.type === "city" && intent.uf) {
+      return `city:${intent.uf}:${intent.city || normalizeLookupText(intent.cityName)}`;
+    }
+    return "";
+  }
+
+  function getTerritoryStyle() {
+    return {
+      color: "#0069d9",
+      weight: 2.4,
+      opacity: 0.9,
+      fillColor: "#007aff",
+      fillOpacity: 0.08,
+      dashArray: "7 6",
+      lineCap: "round",
+      lineJoin: "round"
+    };
   }
 
   function refreshMapLayers() {
@@ -2265,6 +2513,7 @@
   function handleSearchInput(event) {
     state.searchQuery = event.target.value.trim();
     state.searchFocusClientId = "";
+    state.searchIntentOverride = null;
     state.searchResultIndex = -1;
     dom.clearSearch.classList.toggle("is-hidden", !state.searchQuery);
 
@@ -2274,7 +2523,339 @@
     }, 170);
   }
 
+  function renderPremiumSearchResults() {
+    const query = normalizeSearchText(state.searchQuery);
+
+    if (!query) {
+      state.searchSuggestions = [];
+      hideSearchResults();
+      return;
+    }
+
+    const suggestions = buildSearchSuggestions(query);
+    state.searchSuggestions = suggestions;
+    dom.searchResults.replaceChildren();
+
+    if (!suggestions.length) {
+      const empty = document.createElement("div");
+      empty.className = "search-empty";
+      empty.textContent = "Nenhuma sugestao encontrada com os filtros atuais.";
+      dom.searchResults.appendChild(empty);
+      showSearchResults();
+      return;
+    }
+
+    suggestions.forEach((suggestion, index) => {
+      const button = document.createElement("button");
+      button.type = "button";
+      button.className = "search-result";
+      button.setAttribute("role", "option");
+      button.setAttribute(
+        "aria-selected",
+        String(index === state.searchResultIndex)
+      );
+
+      if (index === state.searchResultIndex) {
+        button.classList.add("is-highlighted");
+      }
+
+      const type = document.createElement("span");
+      type.className = `search-result-type is-${suggestion.type}`;
+      type.textContent = suggestion.typeLabel;
+
+      const copy = document.createElement("span");
+      copy.className = "search-result-copy";
+
+      const title = document.createElement("strong");
+      title.textContent = suggestion.label;
+
+      const secondary = document.createElement("span");
+      secondary.textContent = suggestion.meta;
+
+      copy.append(title, secondary);
+
+      const location = document.createElement("span");
+      location.className = "search-result-location";
+      location.textContent = suggestion.countText;
+
+      button.append(type, copy, location);
+      button.addEventListener("click", () => selectSearchSuggestion(suggestion));
+
+      dom.searchResults.appendChild(button);
+    });
+
+    showSearchResults();
+  }
+
+  function buildSearchSuggestions(query) {
+    const lookupQuery = normalizeLookupText(query);
+    if (!lookupQuery) return [];
+
+    const pool = getClientsMatchingActiveFilters();
+    const suggestions = [
+      ...buildStateSuggestions(pool, lookupQuery),
+      ...buildCitySuggestions(pool, lookupQuery),
+      ...buildDistrictSuggestions(pool, lookupQuery),
+      ...buildStreetSuggestions(pool, lookupQuery),
+      ...buildClientSuggestions(pool, lookupQuery)
+    ];
+
+    return suggestions
+      .sort(compareSearchSuggestions)
+      .slice(0, SEARCH_LIMITS.TOTAL);
+  }
+
+  function getClientsMatchingActiveFilters() {
+    return state.clients.filter((client) => {
+      if (state.filters.uf && client.uf !== state.filters.uf) return false;
+      if (
+        state.filters.municipio &&
+        client.municipio !== state.filters.municipio
+      ) {
+        return false;
+      }
+      if (
+        state.filters.situacao &&
+        client.situacao !== state.filters.situacao
+      ) {
+        return false;
+      }
+      return true;
+    });
+  }
+
+  function buildStateSuggestions(pool, lookupQuery) {
+    const groups = new Map();
+
+    for (const client of pool) {
+      if (!client.uf) continue;
+      const label = formatStateLabel(client.uf);
+      const aliases = [
+        client.uf,
+        label,
+        BRAZIL_STATE_LABELS[client.uf]
+      ].map(normalizeLookupText);
+
+      if (!aliases.some((alias) => textMatchesLookup(alias, lookupQuery))) continue;
+
+      const current = groups.get(client.uf) || {
+        type: "state",
+        typeLabel: "Estado",
+        label,
+        meta: "Limite territorial IBGE quando disponivel",
+        count: 0,
+        countText: "",
+        inputValue: label,
+        rank: getSuggestionRank(aliases[0], lookupQuery, 10),
+        intent: { type: "state", uf: client.uf }
+      };
+
+      current.count += 1;
+      current.countText = `${formatNumber(current.count)} clientes`;
+      groups.set(client.uf, current);
+    }
+
+    return Array.from(groups.values())
+      .sort(compareSearchSuggestions)
+      .slice(0, SEARCH_LIMITS.STATES);
+  }
+
+  function buildCitySuggestions(pool, lookupQuery) {
+    const groups = groupClients(pool, (client) =>
+      client.municipio && client.uf
+        ? `${normalizeLookupText(client.municipio)}|${client.uf}`
+        : ""
+    );
+
+    return Array.from(groups.values())
+      .map((group) => {
+        const client = group.clients[0];
+        const label = [client.municipio, client.uf].filter(Boolean).join(" - ");
+        const lookup = normalizeLookupText(label);
+        const cityLookup = normalizeLookupText(client.municipio);
+        if (
+          !textMatchesLookup(lookup, lookupQuery) &&
+          !textMatchesLookup(cityLookup, lookupQuery)
+        ) {
+          return null;
+        }
+
+        return {
+          type: "city",
+          typeLabel: "Cidade",
+          label,
+          meta: "Zoom no municipio e limite IBGE quando disponivel",
+          count: group.clients.length,
+          countText: `${formatNumber(group.clients.length)} clientes`,
+          inputValue: label,
+          rank: getSuggestionRank(cityLookup, lookupQuery, 20),
+          intent: {
+            type: "city",
+            city: cityLookup,
+            cityName: client.municipio,
+            uf: client.uf
+          }
+        };
+      })
+      .filter(Boolean)
+      .sort(compareSearchSuggestions)
+      .slice(0, SEARCH_LIMITS.CITIES);
+  }
+
+  function buildDistrictSuggestions(pool, lookupQuery) {
+    if (lookupQuery.length < 2) return [];
+
+    return buildPlaceSuggestions({
+      pool,
+      lookupQuery,
+      type: "district",
+      typeLabel: "Bairro",
+      limit: SEARCH_LIMITS.DISTRICTS,
+      rankBase: 35,
+      labelGetter: (client) => cleanValue(client.bairro),
+      intentGetter: (client) => ({
+        type: "district",
+        district: normalizeLookupText(client.bairro),
+        city: normalizeLookupText(client.municipio),
+        uf: client.uf
+      })
+    });
+  }
+
+  function buildStreetSuggestions(pool, lookupQuery) {
+    if (lookupQuery.length < 3) return [];
+
+    return buildPlaceSuggestions({
+      pool,
+      lookupQuery,
+      type: "street",
+      typeLabel: "Rua",
+      limit: SEARCH_LIMITS.STREETS,
+      rankBase: 45,
+      labelGetter: (client) => cleanValue(client.logradouro),
+      intentGetter: (client) => ({
+        type: "street",
+        street: normalizeLookupText(client.logradouro),
+        district: normalizeLookupText(client.bairro),
+        city: normalizeLookupText(client.municipio),
+        uf: client.uf
+      })
+    });
+  }
+
+  function buildPlaceSuggestions({
+    pool,
+    lookupQuery,
+    type,
+    typeLabel,
+    limit,
+    rankBase,
+    labelGetter,
+    intentGetter
+  }) {
+    const groups = groupClients(pool, (client) => {
+      const label = labelGetter(client);
+      if (!label) return "";
+      return `${normalizeLookupText(label)}|${normalizeLookupText(client.municipio)}|${client.uf}`;
+    });
+
+    return Array.from(groups.values())
+      .map((group) => {
+        const client = group.clients[0];
+        const label = labelGetter(client);
+        const lookup = normalizeLookupText(label);
+        if (!textMatchesLookup(lookup, lookupQuery)) return null;
+
+        const location = [client.municipio, client.uf].filter(Boolean).join(" - ");
+        return {
+          type,
+          typeLabel,
+          label,
+          meta: location || "Localidade da base",
+          count: group.clients.length,
+          countText: `${formatNumber(group.clients.length)} clientes`,
+          inputValue: [label, location].filter(Boolean).join(" - "),
+          rank: getSuggestionRank(lookup, lookupQuery, rankBase),
+          intent: intentGetter(client)
+        };
+      })
+      .filter(Boolean)
+      .sort(compareSearchSuggestions)
+      .slice(0, limit);
+  }
+
+  function buildClientSuggestions(pool, lookupQuery) {
+    return pool
+      .filter((client) => {
+        const searchable = normalizeLookupText(
+          [
+            client.displayName,
+            client.razaoSocial,
+            client.nomeFantasia,
+            client.cnpj
+          ].filter(Boolean).join(" ")
+        );
+        return textMatchesLookup(searchable, lookupQuery);
+      })
+      .map((client) => {
+        const nameLookup = normalizeLookupText(client.displayName);
+        const cnpjLookup = onlyDigits(client.cnpj);
+        const digitQuery = onlyDigits(lookupQuery);
+        const cnpjMatch = digitQuery && cnpjLookup.includes(digitQuery);
+        const typeLabel = cnpjMatch ? "CNPJ" : "Cliente";
+
+        return {
+          type: cnpjMatch ? "cnpj" : "client",
+          typeLabel,
+          label: client.displayName,
+          meta: client.cnpj || client.razaoSocial || "Cliente da base",
+          count: 1,
+          countText: [client.municipio, client.uf].filter(Boolean).join(" - "),
+          inputValue: client.displayName,
+          rank: getSuggestionRank(nameLookup, lookupQuery, cnpjMatch ? 4 : 60),
+          intent: { type: "client", client }
+        };
+      })
+      .sort(compareSearchSuggestions)
+      .slice(0, SEARCH_LIMITS.CLIENTS);
+  }
+
+  function compareSearchSuggestions(a, b) {
+    if (a.rank !== b.rank) return a.rank - b.rank;
+    if (b.count !== a.count) return b.count - a.count;
+    return a.label.localeCompare(b.label, "pt-BR", {
+      sensitivity: "base",
+      numeric: true
+    });
+  }
+
+  function groupClients(clients, keyGetter) {
+    const groups = new Map();
+
+    for (const client of clients) {
+      const key = keyGetter(client);
+      if (!key) continue;
+      const group = groups.get(key) || { key, clients: [] };
+      group.clients.push(client);
+      groups.set(key, group);
+    }
+
+    return groups;
+  }
+
+  function textMatchesLookup(text, query) {
+    return Boolean(text && query && (text === query || text.startsWith(query) || text.includes(query)));
+  }
+
+  function getSuggestionRank(text, query, base) {
+    if (text === query) return base;
+    if (text.startsWith(query)) return base + 1;
+    return base + 8;
+  }
+
   function renderSearchResults() {
+    return renderPremiumSearchResults();
+
     const query = normalizeSearchText(state.searchQuery);
 
     if (!query) {
@@ -2342,6 +2923,8 @@
   }
 
   function handleSearchKeyboard(event) {
+    return handlePremiumSearchKeyboard(event);
+
     if (!state.searchQuery) return;
 
     const matches = state.filteredClients.slice(0, 8);
@@ -2379,15 +2962,73 @@
   }
 
   function selectSearchResult(client) {
-    state.searchQuery = client.displayName;
-    state.searchFocusClientId = client.id;
+    return selectSearchSuggestion({
+      type: "client",
+      typeLabel: "Cliente",
+      label: client.displayName,
+      meta: client.cnpj || client.razaoSocial || "Cliente da base",
+      countText: [client.municipio, client.uf].filter(Boolean).join(" - "),
+      inputValue: client.displayName,
+      intent: { type: "client", client }
+    });
+  }
+
+  function handlePremiumSearchKeyboard(event) {
+    if (!state.searchQuery) return;
+
+    const suggestions = state.searchSuggestions.length
+      ? state.searchSuggestions
+      : buildSearchSuggestions(normalizeSearchText(state.searchQuery));
+
+    if (event.key === "ArrowDown") {
+      event.preventDefault();
+      state.searchResultIndex = Math.min(
+        state.searchResultIndex + 1,
+        suggestions.length - 1
+      );
+      renderSearchResults();
+      return;
+    }
+
+    if (event.key === "ArrowUp") {
+      event.preventDefault();
+      state.searchResultIndex = Math.max(state.searchResultIndex - 1, 0);
+      renderSearchResults();
+      return;
+    }
+
+    if (event.key === "Enter") {
+      const selected =
+        suggestions[state.searchResultIndex] || suggestions[0] || null;
+      if (selected) {
+        event.preventDefault();
+        selectSearchSuggestion(selected);
+      }
+      return;
+    }
+
+    if (event.key === "Escape") {
+      hideSearchResults();
+    }
+  }
+
+  function selectSearchSuggestion(suggestion) {
+    const intent = suggestion?.intent;
+    if (!intent) return;
+
+    state.searchIntentOverride = intent;
+    state.searchQuery = suggestion.inputValue || suggestion.label;
+    state.searchFocusClientId = intent.type === "client" ? intent.client.id : "";
     state.searchResultIndex = -1;
     state.lastSearchFitKey = "";
-    dom.searchInput.value = client.displayName;
+    dom.searchInput.value = state.searchQuery;
     dom.clearSearch.classList.remove("is-hidden");
     hideSearchResults();
     applyFilters({ fit: true });
-    openClient(client, { focusMap: false });
+
+    if (intent.type === "client") {
+      openClient(intent.client, { focusMap: false });
+    }
   }
 
   function openClient(client, { focusMap = false, listMode = false } = {}) {
