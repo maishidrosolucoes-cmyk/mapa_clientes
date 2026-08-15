@@ -20,6 +20,15 @@
     PAGE_SIZE: 1000
   });
 
+  const APP_VERSION_FALLBACK = "20260815-auto-refresh1";
+  const APP_VERSION = getCurrentAppVersion();
+  const VERSION_CHECK = Object.freeze({
+    URL: "./version.json",
+    INTERVAL_MS: 60000,
+    INITIAL_DELAY_MS: 12000,
+    RELOAD_DELAY_MS: 900
+  });
+
   const BRAZIL_BOUNDS = Object.freeze([
     [-34.2, -74.1],
     [5.4, -32.2]
@@ -207,6 +216,8 @@
     toastTimer: null,
     searchTimer: null,
     regionTimer: null,
+    updateCheckTimer: null,
+    updateReloading: false,
     heatAnimationFrame: null,
     heatAnimationClassTimer: null,
     satelliteNoticeShown: false,
@@ -225,6 +236,7 @@
     bindEvents();
     syncViewButtons();
     syncBaseButtons();
+    startUpdateChecks();
 
     if (!state.map) return;
     await connectAndLoad();
@@ -2710,6 +2722,65 @@
     state.searchResultIndex = -1;
   }
 
+  function startUpdateChecks() {
+    if (!window.fetch || window.location.protocol === "file:") return;
+
+    window.setTimeout(checkForAppUpdate, VERSION_CHECK.INITIAL_DELAY_MS);
+
+    document.addEventListener("visibilitychange", () => {
+      if (!document.hidden) checkForAppUpdate();
+    });
+  }
+
+  async function checkForAppUpdate() {
+    if (state.updateReloading) return;
+
+    window.clearTimeout(state.updateCheckTimer);
+
+    try {
+      const response = await fetch(
+        `${VERSION_CHECK.URL}?t=${Date.now()}`,
+        {
+          cache: "no-store",
+          headers: {
+            "Cache-Control": "no-cache",
+            Pragma: "no-cache"
+          }
+        }
+      );
+
+      if (!response.ok) return;
+
+      const payload = await response.json();
+      const nextVersion = cleanValue(payload?.version);
+
+      if (nextVersion && nextVersion !== APP_VERSION) {
+        forceAppUpdate(nextVersion);
+        return;
+      }
+    } catch (error) {
+      console.warn("[Mapa de clientes] Nao foi possivel verificar atualizacao:", error);
+    } finally {
+      if (!state.updateReloading) {
+        state.updateCheckTimer = window.setTimeout(
+          checkForAppUpdate,
+          VERSION_CHECK.INTERVAL_MS
+        );
+      }
+    }
+  }
+
+  function forceAppUpdate(nextVersion) {
+    state.updateReloading = true;
+    showToast("Nova versao publicada. Atualizando automaticamente...");
+
+    window.setTimeout(() => {
+      const url = new URL(window.location.href);
+      url.searchParams.set("app_version", nextVersion);
+      window.location.replace(url.toString());
+    }, VERSION_CHECK.RELOAD_DELAY_MS);
+  }
+
   function showLoadingStatus(title, message) {
     dom.statusTitle.textContent = title;
     dom.statusMessage.textContent = message;
@@ -3119,5 +3190,21 @@
 
   function toCamelCase(value) {
     return value.replace(/-([a-z])/g, (_, char) => char.toUpperCase());
+  }
+
+  function getCurrentAppVersion() {
+    const pageVersion = readUrlParam(window.location.href, "app_version");
+    const scriptVersion = readUrlParam(document.currentScript?.src, "v");
+    return pageVersion || scriptVersion || APP_VERSION_FALLBACK;
+  }
+
+  function readUrlParam(url, key) {
+    if (!url) return "";
+
+    try {
+      return String(new URL(url, window.location.href).searchParams.get(key) || "").trim();
+    } catch {
+      return "";
+    }
   }
 })();
