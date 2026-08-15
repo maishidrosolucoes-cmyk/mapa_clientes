@@ -100,6 +100,18 @@ select:focus-visible {
   transition-duration: 90ms !important;
 }
 
+.leaflet-heatmap-layer {
+  will-change: opacity, transform;
+}
+
+.map.is-heat-mode .leaflet-heatmap-layer {
+  opacity: 0.98;
+}
+
+.map.is-heat-animating .leaflet-heatmap-layer {
+  animation: heat-reveal 460ms cubic-bezier(0.2, 0.8, 0.2, 1) both;
+}
+
 .leaflet-control-attribution {
   margin: 0 calc(8px + var(--safe-right)) calc(6px + var(--safe-bottom)) 0 !important;
   padding: 3px 7px !important;
@@ -1783,6 +1795,23 @@ select:focus-visible {
   0% { box-shadow: 0 0 0 0 rgba(0, 122, 255, 0.28); }
   70% { box-shadow: 0 0 0 14px rgba(0, 122, 255, 0); }
   100% { box-shadow: 0 0 0 0 rgba(0, 122, 255, 0); }
+}
+
+@keyframes heat-reveal {
+  from {
+    opacity: 0;
+    transform: scale(0.985);
+    filter: saturate(0.9);
+  }
+  55% {
+    opacity: 0.92;
+    filter: saturate(1.1);
+  }
+  to {
+    opacity: 0.98;
+    transform: scale(1);
+    filter: saturate(1);
+  }
 }
 
 @media (max-width: 900px) {

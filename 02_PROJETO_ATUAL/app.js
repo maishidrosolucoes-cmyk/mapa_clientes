@@ -38,6 +38,22 @@
     WHEEL_DEBOUNCE_TIME: 12
   });
 
+  const HEAT_STYLE = Object.freeze({
+    DESKTOP: {
+      radius: 28,
+      blur: 22,
+      minOpacity: 0.22,
+      maxZoom: 13
+    },
+    MOBILE: {
+      radius: 21,
+      blur: 15,
+      minOpacity: 0.24,
+      maxZoom: 12
+    },
+    MOBILE_ANIMATION_MS: 460
+  });
+
   const STORAGE_KEY = "mapa-clientes:v1";
 
   const BASE_LAYER = Object.freeze({
@@ -82,6 +98,7 @@
     filteredClients: [],
     markerLayer: null,
     heatLayer: null,
+    heatPoints: [],
     selectedLayer: null,
     baseLayers: {},
     activeBaseLayer: null,
@@ -100,6 +117,8 @@
     },
     toastTimer: null,
     searchTimer: null,
+    heatAnimationFrame: null,
+    heatAnimationClassTimer: null,
     satelliteNoticeShown: false,
     satelliteErrorShown: false,
     loading: false
@@ -123,6 +142,7 @@
 
   function cacheDom() {
     const ids = [
+      "map",
       "search-input",
       "clear-search",
       "search-results",
@@ -287,12 +307,7 @@
     const heatAvailable = typeof L.heatLayer === "function";
 
     state.heatLayer = heatAvailable
-      ? L.heatLayer([], {
-          radius: 28,
-          blur: 22,
-          minOpacity: 0.22,
-          maxZoom: 13
-        })
+      ? L.heatLayer([], getHeatOptions())
       : L.layerGroup();
 
     if (!heatAvailable) {
@@ -453,6 +468,9 @@
       "resize",
       debounce(() => {
         state.map?.invalidateSize({ pan: false });
+        if (state.viewMode === "heat") {
+          refreshHeatLayer({ animate: false });
+        }
       }, 120)
     );
   }
@@ -1341,12 +1359,16 @@
       state.markerLayer.addLayers(markers);
     }
 
-    const heatPoints = mappable.map((client) => [
+    state.heatPoints = mappable.map((client) => [
       client.latitude,
       client.longitude,
       1
     ]);
-    state.heatLayer.setLatLngs(heatPoints);
+
+    if (state.viewMode !== "heat") {
+      stopHeatAnimation();
+      state.heatLayer.setLatLngs(state.heatPoints);
+    }
 
     applyViewMode({ persist: false });
   }
@@ -1362,13 +1384,17 @@
     if (!state.map || !state.markerLayer || !state.heatLayer) return;
 
     if (state.viewMode === "heat") {
+      dom.map.classList.add("is-heat-mode");
       if (state.map.hasLayer(state.markerLayer)) {
         state.map.removeLayer(state.markerLayer);
       }
       if (!state.map.hasLayer(state.heatLayer)) {
         state.heatLayer.addTo(state.map);
       }
+      refreshHeatLayer({ animate: true });
     } else {
+      dom.map.classList.remove("is-heat-mode", "is-heat-animating");
+      stopHeatAnimation();
       if (state.map.hasLayer(state.heatLayer)) {
         state.map.removeLayer(state.heatLayer);
       }
@@ -1388,6 +1414,93 @@
 
     dom.viewMarkers.setAttribute("aria-pressed", String(markerActive));
     dom.viewHeat.setAttribute("aria-pressed", String(!markerActive));
+  }
+
+  function getHeatOptions() {
+    return isMobileViewport() ? HEAT_STYLE.MOBILE : HEAT_STYLE.DESKTOP;
+  }
+
+  function refreshHeatLayer({ animate = false } = {}) {
+    if (!state.heatLayer?.setLatLngs) return;
+
+    if (typeof state.heatLayer.setOptions === "function") {
+      state.heatLayer.setOptions(getHeatOptions());
+    }
+
+    if (
+      !animate ||
+      !isMobileViewport() ||
+      prefersReducedMotion() ||
+      !state.heatPoints.length
+    ) {
+      stopHeatAnimation();
+      state.heatLayer.setLatLngs(state.heatPoints);
+      return;
+    }
+
+    animateHeatLayer();
+  }
+
+  function animateHeatLayer() {
+    stopHeatAnimation();
+    triggerHeatCanvasAnimation();
+
+    const points = state.heatPoints.slice();
+    const start = performance.now();
+    const duration = HEAT_STYLE.MOBILE_ANIMATION_MS;
+
+    const tick = (now) => {
+      if (
+        state.viewMode !== "heat" ||
+        !state.map?.hasLayer(state.heatLayer)
+      ) {
+        stopHeatAnimation();
+        return;
+      }
+
+      const progress = clamp((now - start) / duration, 0, 1);
+      const eased = 1 - Math.pow(1 - progress, 3);
+      const intensity = 0.12 + eased * 0.88;
+
+      state.heatLayer.setLatLngs(
+        points.map((point) => [
+          point[0],
+          point[1],
+          (point[2] || 1) * intensity
+        ])
+      );
+
+      if (progress < 1) {
+        state.heatAnimationFrame = window.requestAnimationFrame(tick);
+      } else {
+        state.heatLayer.setLatLngs(points);
+        state.heatAnimationFrame = null;
+      }
+    };
+
+    state.heatAnimationFrame = window.requestAnimationFrame(tick);
+  }
+
+  function triggerHeatCanvasAnimation() {
+    if (!dom.map) return;
+
+    window.clearTimeout(state.heatAnimationClassTimer);
+    dom.map.classList.remove("is-heat-animating");
+    void dom.map.offsetWidth;
+    dom.map.classList.add("is-heat-animating");
+
+    state.heatAnimationClassTimer = window.setTimeout(() => {
+      dom.map.classList.remove("is-heat-animating");
+    }, HEAT_STYLE.MOBILE_ANIMATION_MS + 80);
+  }
+
+  function stopHeatAnimation() {
+    if (state.heatAnimationFrame) {
+      window.cancelAnimationFrame(state.heatAnimationFrame);
+      state.heatAnimationFrame = null;
+    }
+
+    window.clearTimeout(state.heatAnimationClassTimer);
   }
 
   function setBaseLayer(mode, { persist = true, notify = true } = {}) {
@@ -2222,6 +2335,13 @@
 
   function prefersReducedMotion() {
     return window.matchMedia?.("(prefers-reduced-motion: reduce)")?.matches;
+  }
+
+  function isMobileViewport() {
+    return (
+      window.matchMedia?.("(max-width: 640px), (pointer: coarse)")?.matches ||
+      window.innerWidth <= 640
+    );
   }
 
   function clamp(value, min, max) {
