@@ -87,6 +87,16 @@ select:focus-visible {
   outline: none;
 }
 
+.leaflet-tile {
+  image-rendering: auto;
+  -webkit-font-smoothing: antialiased;
+  backface-visibility: hidden;
+}
+
+.leaflet-tile-container {
+  will-change: transform;
+}
+
 .leaflet-zoom-animated {
   will-change: transform;
 }
@@ -1817,7 +1827,7 @@ select:focus-visible {
   color: #fff;
   font-size: 12px;
   font-weight: 760;
-  letter-spacing: -0.02em;
+  letter-spacing: 0;
   -webkit-backdrop-filter: blur(10px);
   backdrop-filter: blur(10px);
 }
@@ -2087,6 +2097,33 @@ select:focus-visible {
     top: -28px;
     max-width: 150px;
     font-size: 10.5px;
+  }
+
+  .client-marker {
+    width: 18px;
+    height: 18px;
+    border-width: 2px;
+    opacity: 0.86;
+    box-shadow:
+      0 2px 5px rgba(0, 0, 0, 0.18),
+      0 0 0 1px rgba(0, 122, 255, 0.14);
+  }
+
+  .client-marker::after {
+    inset: -4px;
+    border-color: rgba(0, 122, 255, 0.18);
+  }
+
+  .client-marker.is-inactive {
+    opacity: 0.76;
+  }
+
+  .marker-cluster .cluster-bubble {
+    border-width: 2px;
+    background: rgba(0, 122, 255, 0.84);
+    box-shadow:
+      0 3px 10px rgba(0, 0, 0, 0.16),
+      0 0 0 2px rgba(0, 122, 255, 0.1);
   }
 
   .leaflet-control-attribution {
