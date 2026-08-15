@@ -2385,8 +2385,10 @@
   }
 
   function buildAddressQuery(client) {
-    const rawAddress = cleanValue(client.raw?.endereco_busca);
-    if (rawAddress) return rawAddress;
+    const rawAddress = cleanOptionalValue(client.raw?.endereco_busca);
+    if (rawAddress && hasUsefulAddressText(rawAddress, client)) {
+      return rawAddress;
+    }
 
     return [
       client.logradouro,
@@ -2400,9 +2402,32 @@
   }
 
   function buildGoogleMapsUrl(client) {
+    if (client?.hasValidCoordinates) {
+      const latitude = Number(client.latitude).toFixed(6);
+      const longitude = Number(client.longitude).toFixed(6);
+      return `https://www.google.com/maps/search/?api=1&query=${latitude},${longitude}`;
+    }
+
     const query = buildAddressQuery(client);
     if (!query) return "";
     return `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(query)}`;
+  }
+
+  function hasUsefulAddressText(address, client) {
+    const normalizedAddress = normalizeSearchText(address);
+    if (!normalizedAddress) return false;
+
+    const hasCity = client.municipio
+      ? normalizedAddress.includes(normalizeSearchText(client.municipio))
+      : true;
+    const hasUf = client.uf
+      ? normalizedAddress.includes(normalizeSearchText(client.uf))
+      : true;
+    const hasBrazil = /\bbrasil\b|\bbrazil\b/.test(normalizedAddress);
+    const hasCep = /\b\d{5}-?\d{3}\b/.test(address);
+    const hasStreetOrDistrict = Boolean(client.logradouro || client.bairro);
+
+    return hasCity && hasUf && (hasBrazil || hasCep || hasStreetOrDistrict);
   }
 
   function buildTelHref(client) {
