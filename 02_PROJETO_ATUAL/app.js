@@ -117,6 +117,7 @@
     },
     toastTimer: null,
     searchTimer: null,
+    regionTimer: null,
     heatAnimationFrame: null,
     heatAnimationClassTimer: null,
     satelliteNoticeShown: false,
@@ -162,6 +163,10 @@
       "zoom-in",
       "zoom-out",
       "fit-brazil",
+      "region-readout",
+      "region-level",
+      "region-title",
+      "region-subtitle",
       "client-panel",
       "sheet-handle",
       "close-panel",
@@ -322,6 +327,10 @@
     state.map.on("click", () => {
       hideSearchResults();
     });
+
+    state.map.on("move zoom", scheduleRegionReadoutUpdate);
+    state.map.on("moveend zoomend", updateRegionReadout);
+    updateRegionReadout();
 
     applyViewMode({ persist: false });
   }
@@ -1341,6 +1350,7 @@
     }
 
     renderReport();
+    updateRegionReadout();
 
     if (fit) fitFilteredClients();
   }
@@ -1371,6 +1381,195 @@
     }
 
     applyViewMode({ persist: false });
+  }
+
+  function scheduleRegionReadoutUpdate() {
+    clearTimeout(state.regionTimer);
+    dom.regionReadout.classList.add("is-updating");
+
+    state.regionTimer = window.setTimeout(() => {
+      updateRegionReadout();
+    }, isMobileViewport() ? 140 : 90);
+  }
+
+  function updateRegionReadout() {
+    if (!state.map || !dom.regionReadout) return;
+
+    clearTimeout(state.regionTimer);
+    dom.regionReadout.classList.remove("is-updating");
+
+    const visibleClients = getVisibleRegionClients();
+    const zoom = state.map.getZoom();
+    const radius = getCurrentMapRadiusMeters();
+
+    if (!state.clients.length) {
+      setRegionReadout({
+        level: "Mapa",
+        title: "Brasil",
+        subtitle: "Carregando leitura da base de clientes..."
+      });
+      return;
+    }
+
+    if (!visibleClients.length) {
+      setRegionReadout({
+        level: getRegionLevelLabel(zoom),
+        title: "Sem clientes na vista",
+        subtitle: `Mova o mapa ou reduza o zoom - ${formatDistance(radius)}`
+      });
+      return;
+    }
+
+    const level = getRegionLevel(zoom);
+    const context = buildRegionContext(level, visibleClients);
+    const countText = `${formatNumber(visibleClients.length)} cliente(s) na vista`;
+
+    setRegionReadout({
+      level: context.levelLabel,
+      title: context.title,
+      subtitle: `${context.subtitle} - ${countText} - ${formatDistance(radius)}`
+    });
+  }
+
+  function setRegionReadout({ level, title, subtitle }) {
+    dom.regionLevel.textContent = level;
+    dom.regionTitle.textContent = title;
+    dom.regionSubtitle.textContent = subtitle;
+  }
+
+  function getVisibleRegionClients() {
+    if (!state.map) return [];
+
+    const bounds = state.map.getBounds();
+    return state.filteredClients.filter(
+      (client) =>
+        client.hasValidCoordinates &&
+        bounds.contains([client.visualLatitude, client.visualLongitude])
+    );
+  }
+
+  function getRegionLevel(zoom) {
+    if (zoom < 6) return "state";
+    if (zoom < 10) return "city";
+    if (zoom < 14) return "district";
+    return "street";
+  }
+
+  function getRegionLevelLabel(zoom) {
+    const level = getRegionLevel(zoom);
+    if (level === "state") return "Estado";
+    if (level === "city") return "Cidade";
+    if (level === "district") return "Bairro";
+    return "Rua";
+  }
+
+  function buildRegionContext(level, clients) {
+    if (level === "state") {
+      const entry = getTopRegionEntry(clients, (client) => client.uf, "Brasil");
+      return {
+        levelLabel: "Estado",
+        title: entry.label,
+        subtitle: `${formatNumber(entry.count)} cliente(s) no estado predominante`
+      };
+    }
+
+    if (level === "city") {
+      const entry = getTopRegionEntry(
+        clients,
+        (client) => [client.municipio, client.uf].filter(Boolean).join(" - "),
+        "Cidade nao informada"
+      );
+      return {
+        levelLabel: "Cidade",
+        title: entry.label,
+        subtitle: `${formatNumber(entry.count)} cliente(s) na cidade predominante`
+      };
+    }
+
+    if (level === "district") {
+      const entry = getTopRegionEntry(
+        clients,
+        (client) =>
+          cleanValue(client.bairro) ||
+          [client.municipio, client.uf].filter(Boolean).join(" - "),
+        "Bairro nao informado"
+      );
+      return {
+        levelLabel: "Bairro",
+        title: entry.label,
+        subtitle: `${formatNumber(entry.count)} cliente(s) na area predominante`
+      };
+    }
+
+    const nearestStreet = getNearestRegionClient(clients, (client) =>
+      cleanValue(client.logradouro)
+    );
+    const fallback = getNearestRegionClient(clients);
+    const client = nearestStreet || fallback;
+    const title =
+      cleanValue(client?.logradouro) ||
+      cleanValue(client?.bairro) ||
+      [client?.municipio, client?.uf].filter(Boolean).join(" - ") ||
+      "Rua nao informada";
+    const subtitle = [
+      cleanValue(client?.bairro),
+      [client?.municipio, client?.uf].filter(Boolean).join(" - ")
+    ].filter(Boolean).join(" - ");
+
+    return {
+      levelLabel: "Rua",
+      title,
+      subtitle: subtitle || "Cliente mais proximo do centro"
+    };
+  }
+
+  function getTopRegionEntry(clients, getter, fallbackLabel) {
+    const groups = new Map();
+
+    for (const client of clients) {
+      const label = cleanValue(getter(client)) || fallbackLabel;
+      groups.set(label, (groups.get(label) || 0) + 1);
+    }
+
+    return Array.from(groups, ([label, count]) => ({ label, count }))
+      .sort((a, b) => {
+        if (b.count !== a.count) return b.count - a.count;
+        return String(a.label).localeCompare(String(b.label), "pt-BR", {
+          sensitivity: "base",
+          numeric: true
+        });
+      })[0] || { label: fallbackLabel, count: 0 };
+  }
+
+  function getNearestRegionClient(clients, predicate) {
+    if (!state.map || !clients.length) return null;
+
+    const center = state.map.getCenter();
+    let nearest = null;
+    let nearestDistance = Infinity;
+
+    for (const client of clients) {
+      if (predicate && !predicate(client)) continue;
+
+      const distance = state.map.distance(
+        center,
+        [client.visualLatitude, client.visualLongitude]
+      );
+
+      if (distance < nearestDistance) {
+        nearest = client;
+        nearestDistance = distance;
+      }
+    }
+
+    return nearest;
+  }
+
+  function getCurrentMapRadiusMeters() {
+    if (!state.map) return 0;
+
+    const bounds = state.map.getBounds();
+    return state.map.distance(state.map.getCenter(), bounds.getNorthEast());
   }
 
   function setViewMode(mode) {
@@ -2319,6 +2518,23 @@
       maximumFractionDigits: digits,
       minimumFractionDigits: 0
     }).format(value) + "%";
+  }
+
+  function formatDistance(meters) {
+    const value = Number(meters) || 0;
+
+    if (value >= 100000) {
+      return `raio aprox. ${formatNumber(Math.round(value / 1000))} km`;
+    }
+
+    if (value >= 1000) {
+      return `raio aprox. ${new Intl.NumberFormat("pt-BR", {
+        maximumFractionDigits: 1,
+        minimumFractionDigits: 0
+      }).format(value / 1000)} km`;
+    }
+
+    return `raio aprox. ${formatNumber(Math.round(value))} m`;
   }
 
   function fallbackCopy(text) {

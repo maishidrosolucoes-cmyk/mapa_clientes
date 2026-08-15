@@ -33,7 +33,7 @@
     rel="stylesheet"
     href="https://unpkg.com/maplibre-gl@5/dist/maplibre-gl.css"
   >
-  <link rel="stylesheet" href="./style.css?v=20260815-heatmobile1">
+  <link rel="stylesheet" href="./style.css?v=20260815-region1">
 </head>
 
 <body>
@@ -220,6 +220,17 @@
         </svg>
       </button>
     </nav>
+
+    <aside
+      id="region-readout"
+      class="region-readout"
+      aria-live="polite"
+      aria-label="Leitura da regiao atual do mapa"
+    >
+      <span id="region-level">Mapa</span>
+      <strong id="region-title">Brasil</strong>
+      <small id="region-subtitle">Aproxime para ler Estado, Cidade, Bairro e Rua.</small>
+    </aside>
 
     <aside
       id="client-panel"
@@ -500,6 +511,6 @@
   <script src="https://unpkg.com/maplibre-gl@5/dist/maplibre-gl.js"></script>
   <script src="https://unpkg.com/@maplibre/maplibre-gl-leaflet/leaflet-maplibre-gl.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
-  <script src="./app.js?v=20260815-heatmobile1"></script>
+  <script src="./app.js?v=20260815-region1"></script>
 </body>
 </html>

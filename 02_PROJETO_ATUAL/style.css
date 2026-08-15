@@ -636,6 +636,61 @@ select:focus-visible {
   background: var(--line);
 }
 
+.region-readout {
+  position: absolute;
+  z-index: 640;
+  right: calc(14px + var(--safe-right));
+  bottom: calc(24px + var(--safe-bottom));
+  display: grid;
+  width: min(310px, calc(100vw - 92px));
+  gap: 4px;
+  padding: 11px 13px;
+  border: 1px solid rgba(255, 255, 255, 0.72);
+  border-radius: 16px;
+  background: rgba(255, 255, 255, 0.84);
+  box-shadow: var(--shadow-sm);
+  -webkit-backdrop-filter: saturate(180%) blur(20px);
+  backdrop-filter: saturate(180%) blur(20px);
+  pointer-events: none;
+  transition: opacity 160ms ease, transform 180ms ease;
+}
+
+.region-readout.is-updating {
+  opacity: 0.76;
+  transform: translateY(2px);
+}
+
+.region-readout span {
+  width: fit-content;
+  padding: 3px 7px;
+  border-radius: 999px;
+  background: rgba(0, 122, 255, 0.1);
+  color: var(--accent-strong);
+  font-size: 10px;
+  font-weight: 780;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+
+.region-readout strong {
+  overflow: hidden;
+  color: var(--text);
+  font-size: 14px;
+  font-weight: 760;
+  line-height: 1.2;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.region-readout small {
+  overflow: hidden;
+  color: var(--text-soft);
+  font-size: 11.5px;
+  line-height: 1.35;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .report-panel {
   position: absolute;
   z-index: 820;
@@ -1894,6 +1949,12 @@ select:focus-visible {
     bottom: calc(18px + var(--safe-bottom));
   }
 
+  .region-readout {
+    right: calc(10px + var(--safe-right));
+    bottom: calc(18px + var(--safe-bottom));
+    width: min(280px, calc(100vw - 76px));
+  }
+
   .report-panel {
     inset: calc(104px + var(--safe-top)) calc(8px + var(--safe-right))
       calc(8px + var(--safe-bottom)) calc(8px + var(--safe-left));
@@ -2206,6 +2267,22 @@ select:focus-visible {
     width: 42px;
     padding: 4px;
     border-radius: 14px;
+  }
+
+  .region-readout {
+    right: calc(8px + var(--safe-right));
+    bottom: calc(16px + var(--safe-bottom));
+    width: min(245px, calc(100vw - 66px));
+    padding: 9px 10px;
+    border-radius: 14px;
+  }
+
+  .region-readout strong {
+    font-size: 12.5px;
+  }
+
+  .region-readout small {
+    font-size: 10.5px;
   }
 
   .select-control select {
