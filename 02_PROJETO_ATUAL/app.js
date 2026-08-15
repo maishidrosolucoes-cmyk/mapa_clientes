@@ -574,6 +574,7 @@
 
     document.addEventListener("keydown", (event) => {
       if (event.key === "Escape") {
+        state.map?.closePopup();
         closeTopModal();
       }
     });
@@ -1328,9 +1329,44 @@
       });
 
       marker.client = client;
-      marker.on("click", () => openClient(client, { focusMap: false }));
+      marker.on("click", (event) => handleMarkerClick(client, event));
       state.markerById.set(client.id, marker);
     }
+  }
+
+  function handleMarkerClick(client, event) {
+    const group = getCoordinateGroup(client);
+
+    if (group.length <= 1) {
+      openClient(client, { focusMap: false });
+      return;
+    }
+
+    const latlng =
+      event?.latlng || L.latLng(client.visualLatitude, client.visualLongitude);
+    showPointChoice(group, latlng);
+  }
+
+  function getCoordinateGroup(client) {
+    if (!client) return [];
+    if (!client.coordinateKey) return [client];
+
+    return state.clients.filter(
+      (item) => item.coordinateKey === client.coordinateKey
+    );
+  }
+
+  function uniqueClientsById(clients) {
+    const seen = new Set();
+    const unique = [];
+
+    for (const client of clients) {
+      if (!client?.id || seen.has(client.id)) continue;
+      seen.add(client.id);
+      unique.push(client);
+    }
+
+    return unique;
   }
 
   function handleClusterClick(event) {
@@ -1344,29 +1380,14 @@
     const coordinateKeys = new Set(clients.map((client) => client.coordinateKey));
     const samePoint = coordinateKeys.size === 1;
 
-    if (samePoint || state.map.getZoom() >= state.map.getMaxZoom() - 1) {
+    if (samePoint) {
       if (event.originalEvent) L.DomEvent.stop(event.originalEvent);
+      showPointChoice(clients, cluster.getLatLng?.() || cluster.getBounds().getCenter());
+      return;
+    }
 
-      const visualBounds = L.latLngBounds(
-        clients.map((client) => [client.visualLatitude, client.visualLongitude])
-      );
-
-      if (
-        samePoint &&
-        visualBounds.isValid() &&
-        state.map.getZoom() < 15
-      ) {
-        state.map.fitBounds(visualBounds, {
-          paddingTopLeft: [28, 170],
-          paddingBottomRight: [28, 44],
-          maxZoom: 16,
-          animate: !prefersReducedMotion(),
-          duration: 0.42
-        });
-        showToast(`${formatNumber(clients.length)} cliente(s) distribuidos visualmente neste ponto.`);
-        return;
-      }
-
+    if (state.map.getZoom() >= state.map.getMaxZoom() - 1) {
+      if (event.originalEvent) L.DomEvent.stop(event.originalEvent);
       openClient(clients[0], { focusMap: true });
       showToast(`${formatNumber(clients.length)} cliente(s) neste ponto. Veja as pre-visualizacoes na ficha.`);
       return;
@@ -1382,6 +1403,122 @@
         duration: 0.42
       });
     }
+  }
+
+  function showPointChoice(clients, latlng) {
+    if (!state.map || !clients.length) return;
+
+    const group = uniqueClientsById(clients).filter(
+      (client) => client.hasValidCoordinates
+    );
+    if (!group.length) return;
+
+    if (group.length === 1) {
+      openClient(group[0], { focusMap: false });
+      return;
+    }
+
+    const content = document.createElement("div");
+    content.className = "point-choice";
+
+    if (window.L?.DomEvent) {
+      L.DomEvent.disableClickPropagation(content);
+      L.DomEvent.disableScrollPropagation(content);
+    }
+
+    const eyebrow = document.createElement("span");
+    eyebrow.className = "point-choice-eyebrow";
+    eyebrow.textContent = `${formatNumber(group.length)} clientes neste ponto`;
+
+    const title = document.createElement("strong");
+    title.textContent = "O que voce quer ver?";
+
+    const actions = document.createElement("div");
+    actions.className = "point-choice-actions";
+
+    const listButton = document.createElement("button");
+    listButton.type = "button";
+    listButton.className = "point-choice-button is-primary";
+    listButton.textContent = "Ver lista completa";
+    listButton.addEventListener("click", () => {
+      state.map.closePopup();
+      openClient(group[0], { focusMap: false });
+    });
+
+    const pointsButton = document.createElement("button");
+    pointsButton.type = "button";
+    pointsButton.className = "point-choice-button";
+    pointsButton.textContent = "Ver todos os pontos";
+    pointsButton.addEventListener("click", () => {
+      state.map.closePopup();
+      focusCoordinateGroup(group);
+    });
+
+    actions.append(listButton, pointsButton);
+    content.append(eyebrow, title, actions);
+
+    L.popup({
+      className: "point-choice-popup",
+      closeButton: false,
+      autoPan: true,
+      autoClose: true,
+      closeOnClick: true,
+      maxWidth: 300,
+      offset: [0, -10]
+    })
+      .setLatLng(latlng)
+      .setContent(content)
+      .openOn(state.map);
+  }
+
+  function focusCoordinateGroup(clients) {
+    if (!state.map) return;
+
+    const points = uniqueClientsById(clients)
+      .filter((client) => client.hasValidCoordinates)
+      .map((client) => [client.visualLatitude, client.visualLongitude]);
+
+    if (!points.length) return;
+
+    clearClientSearchFocusForPointGroup();
+
+    if (state.viewMode !== "markers") {
+      setViewMode("markers");
+    }
+
+    state.selectedLayer?.clearLayers();
+
+    if (points.length === 1) {
+      state.map.flyTo(points[0], 16, {
+        duration: prefersReducedMotion() ? 0 : 0.45
+      });
+      return;
+    }
+
+    const bounds = L.latLngBounds(points);
+    state.map.fitBounds(bounds, {
+      paddingTopLeft: [32, 150],
+      paddingBottomRight: [32, 52],
+      maxZoom: 16,
+      animate: !prefersReducedMotion(),
+      duration: 0.45
+    });
+
+    showToast(`${formatNumber(points.length)} pontos separados para escolha.`);
+  }
+
+  function clearClientSearchFocusForPointGroup() {
+    const searchIntent = getSearchIntent(normalizeSearchText(state.searchQuery));
+    if (!state.searchFocusClientId && searchIntent?.type !== "client") return;
+
+    state.searchQuery = "";
+    state.searchFocusClientId = "";
+    state.searchResultIndex = -1;
+    state.lastSearchFitKey = "";
+    dom.searchInput.value = "";
+    dom.clearSearch.classList.add("is-hidden");
+    hideSearchResults();
+    applyFilters({ fit: false });
   }
 
   function populateFilterOptions() {
@@ -2273,16 +2410,14 @@
   function renderCoordinatePreview(client) {
     dom.coordinatePreviewList.replaceChildren();
 
-    const group = client.coordinateKey
-      ? state.clients.filter((item) => item.coordinateKey === client.coordinateKey)
-      : [];
+    const group = getCoordinateGroup(client);
 
     dom.coordinatePreview.classList.toggle("is-hidden", group.length <= 1);
     if (group.length <= 1) return;
 
     dom.coordinatePreviewCount.textContent = `${formatNumber(group.length)} neste ponto`;
 
-    group.slice(0, 24).forEach((item) => {
+    group.forEach((item) => {
       const button = document.createElement("button");
       button.type = "button";
       button.className = "preview-client-card";
@@ -2313,13 +2448,6 @@
       button.addEventListener("click", () => openClient(item, { focusMap: false }));
       dom.coordinatePreviewList.appendChild(button);
     });
-
-    if (group.length > 24) {
-      const more = document.createElement("div");
-      more.className = "search-empty";
-      more.textContent = `Mais ${formatNumber(group.length - 24)} cliente(s) neste ponto. Use a busca para refinar.`;
-      dom.coordinatePreviewList.appendChild(more);
-    }
   }
 
   function renderSameCoordinate(client) {

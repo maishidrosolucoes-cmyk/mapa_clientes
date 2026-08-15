@@ -1842,6 +1842,81 @@ select:focus-visible {
   font-size: 13px;
 }
 
+.point-choice-popup .leaflet-popup-content-wrapper {
+  border: 1px solid rgba(255, 255, 255, 0.76);
+  border-radius: 16px;
+  background: rgba(255, 255, 255, 0.92);
+  box-shadow: var(--shadow-lg);
+  -webkit-backdrop-filter: blur(18px) saturate(160%);
+  backdrop-filter: blur(18px) saturate(160%);
+}
+
+.point-choice-popup .leaflet-popup-content {
+  width: 258px !important;
+  margin: 12px;
+}
+
+.point-choice-popup .leaflet-popup-tip {
+  background: rgba(255, 255, 255, 0.92);
+}
+
+.point-choice {
+  display: grid;
+  gap: 10px;
+}
+
+.point-choice-eyebrow {
+  color: var(--accent-strong);
+  font-size: 11px;
+  font-weight: 720;
+  text-transform: uppercase;
+}
+
+.point-choice strong {
+  color: var(--text);
+  font-size: 15px;
+  line-height: 1.2;
+}
+
+.point-choice-actions {
+  display: grid;
+  gap: 8px;
+}
+
+.point-choice-button {
+  min-height: 42px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: rgba(245, 245, 247, 0.88);
+  color: var(--text);
+  font-size: 13px;
+  font-weight: 690;
+  cursor: pointer;
+  transition:
+    background 160ms ease,
+    border-color 160ms ease,
+    transform 160ms ease;
+}
+
+.point-choice-button:hover {
+  background: rgba(235, 239, 246, 0.96);
+  border-color: rgba(0, 122, 255, 0.22);
+}
+
+.point-choice-button:active {
+  transform: scale(0.98);
+}
+
+.point-choice-button.is-primary {
+  border-color: rgba(0, 122, 255, 0.26);
+  background: var(--accent);
+  color: #fff;
+}
+
+.point-choice-button.is-primary:hover {
+  background: var(--accent-strong);
+}
+
 .is-hidden {
   display: none !important;
 }
