@@ -270,6 +270,7 @@
       "preview-title",
       "preview-meta",
       "coordinate-preview",
+      "coordinate-preview-title",
       "coordinate-preview-count",
       "coordinate-preview-list",
       "precision-card",
@@ -1442,7 +1443,7 @@
     listButton.textContent = "Ver lista completa";
     listButton.addEventListener("click", () => {
       state.map.closePopup();
-      openClient(group[0], { focusMap: false });
+      openClient(group[0], { focusMap: false, listMode: true });
     });
 
     const pointsButton = document.createElement("button");
@@ -2308,8 +2309,10 @@
     openClient(client, { focusMap: false });
   }
 
-  function openClient(client, { focusMap = false } = {}) {
+  function openClient(client, { focusMap = false, listMode = false } = {}) {
     state.selectedClient = client;
+    const coordinateGroup = getCoordinateGroup(client);
+    dom.clientPanel.classList.toggle("is-list-mode", listMode);
 
     const isActive = normalizeSearchText(client.situacao) === "ativa";
     dom.clientStatus.textContent = client.situacao || "Sem situação";
@@ -2321,6 +2324,14 @@
     dom.clientSubtitle.textContent =
       client.subtitle ||
       [client.municipio, client.uf].filter(Boolean).join(" - ");
+
+    if (listMode) {
+      dom.clientStatus.textContent = "Lista completa";
+      dom.clientStatus.className = "status-badge is-list";
+      dom.clientTitle.textContent = "Clientes neste ponto";
+      dom.clientSubtitle.textContent = buildPointListSubtitle(coordinateGroup, client);
+    }
+
     renderClientPreview(client);
 
     const precision =
@@ -2360,7 +2371,7 @@
         : ""
     );
 
-    renderSameCoordinate(client);
+    renderSameCoordinate(client, { listMode });
     updateClientActions(client);
 
     dom.clientPanel.classList.add("is-open");
@@ -2368,7 +2379,11 @@
     dom.clientPanel.setAttribute("aria-hidden", "false");
     syncModalBackdrop();
 
-    highlightSelectedClient(client);
+    if (listMode) {
+      state.selectedLayer?.clearLayers();
+    } else {
+      highlightSelectedClient(client);
+    }
 
     if (focusMap && !client.hasValidCoordinates) {
       showToast("Este cliente nao possui coordenada valida para centralizar no mapa.");
@@ -2407,21 +2422,72 @@
     dom.previewMeta.textContent = meta.join(" / ");
   }
 
-  function renderCoordinatePreview(client) {
+  function buildPointListSubtitle(group, client) {
+    const location = [
+      cleanValue(client.bairro),
+      [client.municipio, client.uf].filter(Boolean).join(" - ")
+    ].filter(Boolean).join(" / ");
+
+    return [
+      `${formatNumber(group.length)} clientes compartilhando a mesma coordenada`,
+      location || "Localizacao aproximada"
+    ].join(" - ");
+  }
+
+  function sortPointClients(group, selectedClient, { listMode = false } = {}) {
+    return group.slice().sort((a, b) => {
+      if (!listMode) {
+        if (a.id === selectedClient.id) return -1;
+        if (b.id === selectedClient.id) return 1;
+      }
+
+      const aActive = normalizeSearchText(a.situacao) === "ativa";
+      const bActive = normalizeSearchText(b.situacao) === "ativa";
+      if (aActive !== bActive) return aActive ? -1 : 1;
+
+      return String(a.displayName).localeCompare(String(b.displayName), "pt-BR", {
+        sensitivity: "base",
+        numeric: true
+      });
+    });
+  }
+
+  function buildPointClientSubtitle(client, { listMode = false } = {}) {
+    const location = [
+      cleanValue(client.bairro),
+      [client.municipio, client.uf].filter(Boolean).join(" - ")
+    ].filter(Boolean).join(" / ");
+
+    if (!listMode) {
+      return client.cnpj || client.razaoSocial || location;
+    }
+
+    return [
+      client.cnpj ? `CNPJ ${client.cnpj}` : client.razaoSocial,
+      formatCep(client.cep),
+      location
+    ].filter(Boolean).join(" / ");
+  }
+
+  function renderCoordinatePreview(client, { listMode = false } = {}) {
     dom.coordinatePreviewList.replaceChildren();
 
-    const group = getCoordinateGroup(client);
+    const group = sortPointClients(getCoordinateGroup(client), client, { listMode });
 
     dom.coordinatePreview.classList.toggle("is-hidden", group.length <= 1);
+    dom.coordinatePreview.classList.toggle("is-list-mode", listMode);
     if (group.length <= 1) return;
 
-    dom.coordinatePreviewCount.textContent = `${formatNumber(group.length)} neste ponto`;
+    dom.coordinatePreviewTitle.textContent = listMode
+      ? "Lista completa"
+      : "Clientes neste ponto";
+    dom.coordinatePreviewCount.textContent = `${formatNumber(group.length)} clientes`;
 
     group.forEach((item) => {
       const button = document.createElement("button");
       button.type = "button";
       button.className = "preview-client-card";
-      if (item.id === client.id) button.classList.add("is-selected");
+      if (!listMode && item.id === client.id) button.classList.add("is-selected");
       button.setAttribute("aria-label", `Abrir ficha de ${item.displayName}`);
 
       const active = normalizeSearchText(item.situacao) === "ativa";
@@ -2436,7 +2502,7 @@
       title.textContent = item.displayName;
 
       const subtitle = document.createElement("span");
-      subtitle.textContent = item.cnpj || item.razaoSocial || [item.municipio, item.uf].filter(Boolean).join(" - ");
+      subtitle.textContent = buildPointClientSubtitle(item, { listMode });
 
       copy.append(title, subtitle);
 
@@ -2450,8 +2516,8 @@
     });
   }
 
-  function renderSameCoordinate(client) {
-    renderCoordinatePreview(client);
+  function renderSameCoordinate(client, { listMode = false } = {}) {
+    renderCoordinatePreview(client, { listMode });
 
     const row = document.querySelector('[data-field="same-coordinate"]');
     if (!row) return;
@@ -2471,7 +2537,7 @@
 
   function closeClientPanel() {
     state.selectedClient = null;
-    dom.clientPanel.classList.remove("is-open", "is-collapsed");
+    dom.clientPanel.classList.remove("is-open", "is-collapsed", "is-list-mode");
     dom.clientPanel.setAttribute("aria-hidden", "true");
     state.selectedLayer?.clearLayers();
     syncModalBackdrop();
