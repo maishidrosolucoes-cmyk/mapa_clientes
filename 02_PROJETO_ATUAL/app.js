@@ -20,7 +20,7 @@
     PAGE_SIZE: 1000
   });
 
-  const APP_VERSION_FALLBACK = "20260815-auto-refresh1";
+  const APP_VERSION_FALLBACK = "20260815-individual-click1";
   const APP_VERSION = getCurrentAppVersion();
   const VERSION_CHECK = Object.freeze({
     URL: "./version.json",
@@ -45,6 +45,11 @@
     BUTTON_ZOOM_STEP: 1,
     WHEEL_PX_PER_ZOOM_LEVEL: 46,
     WHEEL_DEBOUNCE_TIME: 12
+  });
+
+  const POINT_NAVIGATION = Object.freeze({
+    DESKTOP_INDIVIDUAL_ZOOM: 15,
+    MOBILE_INDIVIDUAL_ZOOM: 16
   });
 
   const HEAT_STYLE = Object.freeze({
@@ -1350,7 +1355,7 @@
   function handleMarkerClick(client, event) {
     const group = getCoordinateGroup(client);
 
-    if (group.length <= 1) {
+    if (shouldOpenIndividualClient(group)) {
       openClient(client, { focusMap: false });
       return;
     }
@@ -1358,6 +1363,17 @@
     const latlng =
       event?.latlng || L.latLng(client.visualLatitude, client.visualLongitude);
     showPointChoice(group, latlng);
+  }
+
+  function shouldOpenIndividualClient(group) {
+    if (!state.map || group.length <= 1) return true;
+    return state.map.getZoom() >= getIndividualClientZoom();
+  }
+
+  function getIndividualClientZoom() {
+    return isMobileViewport()
+      ? POINT_NAVIGATION.MOBILE_INDIVIDUAL_ZOOM
+      : POINT_NAVIGATION.DESKTOP_INDIVIDUAL_ZOOM;
   }
 
   function getCoordinateGroup(client) {
@@ -1502,17 +1518,19 @@
     state.selectedLayer?.clearLayers();
 
     if (points.length === 1) {
-      state.map.flyTo(points[0], 16, {
+      state.map.flyTo(points[0], getIndividualClientZoom(), {
         duration: prefersReducedMotion() ? 0 : 0.45
       });
       return;
     }
 
     const bounds = L.latLngBounds(points);
+    const targetZoom = getIndividualClientZoom();
+
     state.map.fitBounds(bounds, {
       paddingTopLeft: [32, 150],
       paddingBottomRight: [32, 52],
-      maxZoom: 16,
+      maxZoom: targetZoom,
       animate: !prefersReducedMotion(),
       duration: 0.45
     });
