@@ -143,6 +143,7 @@
 
   function cacheDom() {
     const ids = [
+      "app",
       "map",
       "search-input",
       "clear-search",
@@ -167,6 +168,7 @@
       "region-level",
       "region-title",
       "region-subtitle",
+      "modal-backdrop",
       "client-panel",
       "sheet-handle",
       "close-panel",
@@ -457,6 +459,7 @@
     dom.copyClient.addEventListener("click", copySelectedClient);
     dom.openReport.addEventListener("click", openReportPanel);
     dom.closeReport.addEventListener("click", closeReportPanel);
+    dom.modalBackdrop.addEventListener("click", closeTopModal);
 
     dom.statusAction.addEventListener("click", connectAndLoad);
 
@@ -468,8 +471,8 @@
     });
 
     document.addEventListener("keydown", (event) => {
-      if (event.key === "Escape" && state.reportOpen) {
-        closeReportPanel();
+      if (event.key === "Escape") {
+        closeTopModal();
       }
     });
 
@@ -509,6 +512,7 @@
     dom.reportPanel.classList.add("is-open");
     dom.reportPanel.setAttribute("aria-hidden", "false");
     dom.openReport.setAttribute("aria-expanded", "true");
+    syncModalBackdrop();
     renderReport();
   }
 
@@ -517,6 +521,26 @@
     dom.reportPanel.classList.remove("is-open");
     dom.reportPanel.setAttribute("aria-hidden", "true");
     dom.openReport.setAttribute("aria-expanded", "false");
+    syncModalBackdrop();
+  }
+
+  function closeTopModal() {
+    if (state.reportOpen) {
+      closeReportPanel();
+      return;
+    }
+
+    if (state.selectedClient) {
+      closeClientPanel();
+    }
+  }
+
+  function syncModalBackdrop() {
+    const hasActiveModal =
+      state.reportOpen || dom.clientPanel.classList.contains("is-open");
+
+    dom.app.classList.toggle("has-mobile-modal", hasActiveModal);
+    dom.modalBackdrop.classList.toggle("is-visible", hasActiveModal);
   }
 
   function renderReport() {
@@ -1933,6 +1957,7 @@
     dom.clientPanel.classList.add("is-open");
     dom.clientPanel.classList.remove("is-collapsed");
     dom.clientPanel.setAttribute("aria-hidden", "false");
+    syncModalBackdrop();
 
     highlightSelectedClient(client);
 
@@ -2049,6 +2074,7 @@
     dom.clientPanel.classList.remove("is-open", "is-collapsed");
     dom.clientPanel.setAttribute("aria-hidden", "true");
     state.selectedLayer?.clearLayers();
+    syncModalBackdrop();
   }
 
   function toggleMobileSheet() {

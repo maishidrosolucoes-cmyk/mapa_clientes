@@ -691,6 +691,17 @@ select:focus-visible {
   white-space: nowrap;
 }
 
+.modal-backdrop {
+  position: absolute;
+  z-index: 745;
+  inset: 0;
+  display: none;
+  background: rgba(18, 22, 28, 0.22);
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 190ms ease;
+}
+
 .report-panel {
   position: absolute;
   z-index: 820;
@@ -1949,6 +1960,17 @@ select:focus-visible {
     bottom: calc(18px + var(--safe-bottom));
   }
 
+  .modal-backdrop {
+    display: block;
+    -webkit-backdrop-filter: blur(7px) saturate(115%);
+    backdrop-filter: blur(7px) saturate(115%);
+  }
+
+  .modal-backdrop.is-visible {
+    opacity: 1;
+    pointer-events: auto;
+  }
+
   .region-readout {
     right: calc(10px + var(--safe-right));
     bottom: calc(18px + var(--safe-bottom));
@@ -2198,6 +2220,12 @@ select:focus-visible {
     inset: calc(6px + var(--safe-top)) calc(6px + var(--safe-right))
       calc(6px + var(--safe-bottom)) calc(6px + var(--safe-left));
     z-index: 920;
+  }
+
+  .modal-backdrop {
+    background: rgba(18, 22, 28, 0.28);
+    -webkit-backdrop-filter: blur(8px) saturate(112%);
+    backdrop-filter: blur(8px) saturate(112%);
   }
 
   .report-shell {
