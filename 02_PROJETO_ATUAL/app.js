@@ -20,7 +20,7 @@
     PAGE_SIZE: 1000
   });
 
-  const APP_VERSION_FALLBACK = "20260815-individual-click1";
+  const APP_VERSION_FALLBACK = "20260815-pointer-region1";
   const APP_VERSION = getCurrentAppVersion();
   const VERSION_CHECK = Object.freeze({
     URL: "./version.json",
@@ -221,6 +221,8 @@
     toastTimer: null,
     searchTimer: null,
     regionTimer: null,
+    regionTargetLatLng: null,
+    regionTargetSource: "center",
     updateCheckTimer: null,
     updateReloading: false,
     heatAnimationFrame: null,
@@ -445,10 +447,13 @@
 
     state.selectedLayer = L.layerGroup().addTo(state.map);
 
-    state.map.on("click", () => {
+    state.map.on("click", (event) => {
+      setRegionTarget(event.latlng, getClickRegionSource());
       hideSearchResults();
+      updateRegionReadout();
     });
 
+    state.map.on("mousemove", handleRegionPointerMove);
     state.map.on("move zoom", scheduleRegionReadoutUpdate);
     state.map.on("moveend zoomend", updateRegionReadout);
     updateRegionReadout();
@@ -1353,6 +1358,12 @@
   }
 
   function handleMarkerClick(client, event) {
+    setRegionTarget(
+      event?.latlng || L.latLng(client.visualLatitude, client.visualLongitude),
+      getClickRegionSource()
+    );
+    updateRegionReadout();
+
     const group = getCoordinateGroup(client);
 
     if (shouldOpenIndividualClient(group)) {
@@ -1411,12 +1422,17 @@
 
     if (samePoint) {
       if (event.originalEvent) L.DomEvent.stop(event.originalEvent);
-      showPointChoice(clients, cluster.getLatLng?.() || cluster.getBounds().getCenter());
+      const latlng = cluster.getLatLng?.() || cluster.getBounds().getCenter();
+      setRegionTarget(latlng, getClickRegionSource());
+      updateRegionReadout();
+      showPointChoice(clients, latlng);
       return;
     }
 
     if (state.map.getZoom() >= state.map.getMaxZoom() - 1) {
       if (event.originalEvent) L.DomEvent.stop(event.originalEvent);
+      setRegionTarget(cluster.getLatLng?.() || cluster.getBounds().getCenter(), getClickRegionSource());
+      updateRegionReadout();
       openClient(clients[0], { focusMap: true });
       showToast(`${formatNumber(clients.length)} cliente(s) neste ponto. Veja as pre-visualizacoes na ficha.`);
       return;
@@ -1856,15 +1872,45 @@
     }, isMobileViewport() ? 140 : 90);
   }
 
+  function handleRegionPointerMove(event) {
+    if (isMobileViewport()) return;
+    setRegionTarget(event.latlng, "cursor");
+    scheduleRegionReadoutUpdate();
+  }
+
+  function setRegionTarget(latlng, source = "center") {
+    if (!latlng || !Number.isFinite(latlng.lat) || !Number.isFinite(latlng.lng)) return;
+
+    state.regionTargetLatLng = L.latLng(latlng.lat, latlng.lng);
+    state.regionTargetSource = source;
+  }
+
+  function getRegionTargetLatLng() {
+    if (state.regionTargetLatLng) return state.regionTargetLatLng;
+    return state.map?.getCenter?.() || null;
+  }
+
+  function getClickRegionSource() {
+    return isMobileViewport() ? "touch" : "click";
+  }
+
+  function getRegionSourceLabel() {
+    if (state.regionTargetSource === "cursor") return "Cursor";
+    if (state.regionTargetSource === "touch") return "Ultimo toque";
+    if (state.regionTargetSource === "click") return "Clique";
+    return "Centro do mapa";
+  }
+
   function updateRegionReadout() {
     if (!state.map || !dom.regionReadout) return;
 
     clearTimeout(state.regionTimer);
     dom.regionReadout.classList.remove("is-updating");
 
-    const visibleClients = getVisibleRegionClients();
+    const targetLatLng = getRegionTargetLatLng();
+    const regionClients = getRegionReferenceClients();
     const zoom = state.map.getZoom();
-    const radius = getCurrentMapRadiusMeters();
+    const sourceLabel = getRegionSourceLabel();
 
     if (!state.clients.length) {
       setRegionReadout({
@@ -1875,23 +1921,22 @@
       return;
     }
 
-    if (!visibleClients.length) {
+    if (!regionClients.length || !targetLatLng) {
       setRegionReadout({
         level: getRegionLevelLabel(zoom),
-        title: "Sem clientes na vista",
-        subtitle: `Mova o mapa ou reduza o zoom - ${formatDistance(radius)}`
+        title: "Sem referencia na base",
+        subtitle: `${sourceLabel} - ajuste os filtros ou aproxime do mapa`
       });
       return;
     }
 
     const level = getRegionLevel(zoom);
-    const context = buildRegionContext(level, visibleClients);
-    const countText = `${formatNumber(visibleClients.length)} cliente(s) na vista`;
+    const context = buildRegionContext(level, regionClients, targetLatLng);
 
     setRegionReadout({
       level: context.levelLabel,
       title: context.title,
-      subtitle: `${context.subtitle} - ${countText} - ${formatDistance(radius)}`
+      subtitle: `${sourceLabel} - ${context.subtitle}`
     });
   }
 
@@ -1901,14 +1946,9 @@
     dom.regionSubtitle.textContent = subtitle;
   }
 
-  function getVisibleRegionClients() {
-    if (!state.map) return [];
-
-    const bounds = state.map.getBounds();
+  function getRegionReferenceClients() {
     return state.filteredClients.filter(
-      (client) =>
-        client.hasValidCoordinates &&
-        bounds.contains([client.visualLatitude, client.visualLongitude])
+      (client) => client.hasValidCoordinates
     );
   }
 
@@ -1927,21 +1967,21 @@
     return "Rua";
   }
 
-  function buildRegionContext(level, clients) {
+  function buildRegionContext(level, clients, targetLatLng) {
     if (level === "state") {
-      const client = getNearestRegionClient(clients);
+      const client = getNearestRegionClient(clients, null, targetLatLng);
       const title = formatStateLabel(client?.uf) || "Brasil";
       const count = clients.filter((item) => item.uf === client?.uf).length;
 
       return {
         levelLabel: "Estado",
         title,
-        subtitle: `${formatNumber(count || clients.length)} cliente(s) nesta area`
+        subtitle: `${formatNumber(count || clients.length)} cliente(s) no estado - ${formatRegionReference(client, targetLatLng)}`
       };
     }
 
     if (level === "city") {
-      const client = getNearestRegionClient(clients);
+      const client = getNearestRegionClient(clients, null, targetLatLng);
       const title =
         [client?.municipio, client?.uf].filter(Boolean).join(" - ") ||
         "Cidade nao informada";
@@ -1952,14 +1992,14 @@
       return {
         levelLabel: "Cidade",
         title,
-        subtitle: `${formatNumber(count || clients.length)} cliente(s) nesta area`
+        subtitle: `${formatNumber(count || clients.length)} cliente(s) na cidade - ${formatRegionReference(client, targetLatLng)}`
       };
     }
 
     if (level === "district") {
       const client =
-        getNearestRegionClient(clients, (item) => cleanValue(item.bairro)) ||
-        getNearestRegionClient(clients);
+        getNearestRegionClient(clients, (item) => cleanValue(item.bairro), targetLatLng) ||
+        getNearestRegionClient(clients, null, targetLatLng);
       const title =
         cleanValue(client?.bairro) ||
         [client?.municipio, client?.uf].filter(Boolean).join(" - ") ||
@@ -1971,14 +2011,18 @@
       return {
         levelLabel: "Bairro",
         title,
-        subtitle: subtitle || "Area proxima ao centro"
+        subtitle: [subtitle || "Area proxima", formatRegionReference(client, targetLatLng)]
+          .filter(Boolean)
+          .join(" - ")
       };
     }
 
-    const nearestStreet = getNearestRegionClient(clients, (client) =>
-      cleanValue(client.logradouro)
+    const nearestStreet = getNearestRegionClient(
+      clients,
+      (client) => cleanValue(client.logradouro),
+      targetLatLng
     );
-    const fallback = getNearestRegionClient(clients);
+    const fallback = getNearestRegionClient(clients, null, targetLatLng);
     const client = nearestStreet || fallback;
     const title =
       cleanValue(client?.logradouro) ||
@@ -1993,14 +2037,16 @@
     return {
       levelLabel: "Rua",
       title,
-      subtitle: subtitle || "Cliente mais proximo do centro"
+      subtitle: [subtitle || "Cliente mais proximo", formatRegionReference(client, targetLatLng)]
+        .filter(Boolean)
+        .join(" - ")
     };
   }
 
-  function getNearestRegionClient(clients, predicate) {
+  function getNearestRegionClient(clients, predicate, targetLatLng = null) {
     if (!state.map || !clients.length) return null;
 
-    const center = state.map.getCenter();
+    const anchor = targetLatLng || state.map.getCenter();
     let nearest = null;
     let nearestDistance = Infinity;
 
@@ -2008,7 +2054,7 @@
       if (predicate && !predicate(client)) continue;
 
       const distance = state.map.distance(
-        center,
+        anchor,
         [client.visualLatitude, client.visualLongitude]
       );
 
@@ -2021,11 +2067,16 @@
     return nearest;
   }
 
-  function getCurrentMapRadiusMeters() {
-    if (!state.map) return 0;
+  function formatRegionReference(client, targetLatLng) {
+    if (!state.map || !client || !targetLatLng) return "";
 
-    const bounds = state.map.getBounds();
-    return state.map.distance(state.map.getCenter(), bounds.getNorthEast());
+    const distance = state.map.distance(
+      targetLatLng,
+      [client.visualLatitude, client.visualLongitude]
+    );
+
+    if (distance <= 120) return "no ponto indicado";
+    return `ref. mais proxima a ${formatCompactDistance(distance)}`;
   }
 
   function setViewMode(mode) {
@@ -3148,21 +3199,21 @@
     }).format(value) + "%";
   }
 
-  function formatDistance(meters) {
+  function formatCompactDistance(meters) {
     const value = Number(meters) || 0;
 
     if (value >= 100000) {
-      return `raio aprox. ${formatNumber(Math.round(value / 1000))} km`;
+      return `${formatNumber(Math.round(value / 1000))} km`;
     }
 
     if (value >= 1000) {
-      return `raio aprox. ${new Intl.NumberFormat("pt-BR", {
+      return `${new Intl.NumberFormat("pt-BR", {
         maximumFractionDigits: 1,
         minimumFractionDigits: 0
       }).format(value / 1000)} km`;
     }
 
-    return `raio aprox. ${formatNumber(Math.round(value))} m`;
+    return `${formatNumber(Math.round(value))} m`;
   }
 
   function formatStateLabel(uf) {
