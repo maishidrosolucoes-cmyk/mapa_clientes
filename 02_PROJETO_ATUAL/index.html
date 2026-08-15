@@ -36,7 +36,7 @@
     rel="stylesheet"
     href="https://unpkg.com/maplibre-gl@5/dist/maplibre-gl.css"
   >
-  <link rel="stylesheet" href="./style.css?v=20260815-search-boundary1">
+  <link rel="stylesheet" href="./style.css?v=20260815-bi-area1">
 </head>
 
 <body>
@@ -392,99 +392,243 @@
         </header>
 
         <div class="report-body">
-          <section class="report-kpis" aria-label="Indicadores principais">
-            <article class="kpi-card">
-              <span>Clientes analisados</span>
-              <strong id="report-total-value">0</strong>
-              <small id="report-total-note">Base atual</small>
-            </article>
+          <section class="report-command-strip" aria-label="Acoes e escopo do relatorio">
+            <div class="report-scope">
+              <span>Escopo atual</span>
+              <strong id="report-scope-label">Filtros atuais</strong>
+              <small id="report-scope-note">Use filtros, busca ou uma area do mapa para recalcular o BI.</small>
+            </div>
 
-            <article class="kpi-card">
-              <span>Com coordenada</span>
-              <strong id="report-coverage-value">0%</strong>
-              <small id="report-coverage-note">0 pontos no mapa</small>
-            </article>
-
-            <article class="kpi-card">
-              <span>Municipios</span>
-              <strong id="report-cities-value">0</strong>
-              <small id="report-cities-note">Com clientes filtrados</small>
-            </article>
-
-            <article class="kpi-card">
-              <span>Estados</span>
-              <strong id="report-states-value">0</strong>
-              <small id="report-states-note">UFs representadas</small>
-            </article>
-
-            <article class="kpi-card kpi-card-wide">
-              <span>Maior concentracao</span>
-              <strong id="report-top-city-value">-</strong>
-              <small id="report-top-city-note">Sem dados suficientes</small>
-            </article>
-
-            <article class="kpi-card kpi-card-wide">
-              <span>Pontos compartilhados</span>
-              <strong id="report-shared-value">0</strong>
-              <small id="report-shared-note">Clientes no mesmo ponto</small>
-            </article>
+            <div class="report-actions" aria-label="Acoes do relatorio">
+              <button id="report-select-visible-area" class="report-action-button is-primary" type="button">
+                Usar area visivel
+              </button>
+              <button id="report-fit-area" class="report-action-button" type="button" disabled>
+                Ver area
+              </button>
+              <button id="report-clear-area" class="report-action-button" type="button" disabled>
+                Limpar area
+              </button>
+              <button id="report-export-filtered" class="report-action-button" type="button">
+                CSV clientes
+              </button>
+              <button id="report-export-area" class="report-action-button" type="button" disabled>
+                CSV area
+              </button>
+              <button id="report-export-hotspots" class="report-action-button" type="button">
+                CSV hotspots
+              </button>
+            </div>
           </section>
+
+          <nav id="report-tabs" class="report-tabs" aria-label="Secoes do relatorio">
+            <button class="report-tab is-active" type="button" data-report-tab="overview" aria-pressed="true">
+              Visao geral
+            </button>
+            <button class="report-tab" type="button" data-report-tab="territory" aria-pressed="false">
+              Territorios
+            </button>
+            <button class="report-tab" type="button" data-report-tab="quality" aria-pressed="false">
+              Qualidade
+            </button>
+          </nav>
 
           <section id="report-empty" class="report-empty is-hidden">
             Nenhum cliente encontrado para os filtros atuais.
           </section>
 
-          <section class="report-grid" aria-label="Graficos de concentracao">
-            <article class="report-card report-card-large">
-              <div class="report-card-header">
-                <div>
-                  <span>Ranking territorial</span>
-                  <h3>Municipios por concentracao</h3>
-                </div>
-                <strong id="report-top-caption">Top 8</strong>
-              </div>
-              <div id="chart-top-cities" class="bar-chart"></div>
-            </article>
+          <section id="report-section-overview" class="report-tab-panel is-active" data-report-panel="overview">
+            <section class="report-kpis" aria-label="Indicadores principais">
+              <article class="kpi-card">
+                <span>Clientes analisados</span>
+                <strong id="report-total-value">0</strong>
+                <small id="report-total-note">Base atual</small>
+              </article>
 
-            <article class="report-card">
-              <div class="report-card-header">
-                <div>
-                  <span>Carteira</span>
-                  <h3>Situacao cadastral</h3>
-                </div>
-              </div>
-              <div id="chart-status" class="status-chart"></div>
-            </article>
+              <article class="kpi-card">
+                <span>Com coordenada</span>
+                <strong id="report-coverage-value">0%</strong>
+                <small id="report-coverage-note">0 pontos no mapa</small>
+              </article>
 
-            <article class="report-card">
-              <div class="report-card-header">
-                <div>
-                  <span>Distribuicao</span>
-                  <h3>Clientes por UF</h3>
-                </div>
-              </div>
-              <div id="chart-uf" class="bar-chart compact"></div>
-            </article>
+              <article class="kpi-card">
+                <span>Ativos</span>
+                <strong id="report-active-value">0%</strong>
+                <small id="report-active-note">0 clientes ativos</small>
+              </article>
 
-            <article class="report-card">
-              <div class="report-card-header">
-                <div>
-                  <span>Precisao visual</span>
-                  <h3>Clientes por ponto</h3>
-                </div>
-              </div>
-              <div id="chart-coordinate-groups" class="column-chart"></div>
-            </article>
+              <article class="kpi-card">
+                <span>Sem coordenada</span>
+                <strong id="report-unmapped-value">0</strong>
+                <small id="report-unmapped-note">Fora do mapa</small>
+              </article>
 
-            <article class="report-card report-card-large">
-              <div class="report-card-header">
-                <div>
-                  <span>Indice de oportunidade</span>
-                  <h3>Hotspots de clientes</h3>
+              <article class="kpi-card">
+                <span>Municipios</span>
+                <strong id="report-cities-value">0</strong>
+                <small id="report-cities-note">Com clientes filtrados</small>
+              </article>
+
+              <article class="kpi-card">
+                <span>Estados</span>
+                <strong id="report-states-value">0</strong>
+                <small id="report-states-note">UFs representadas</small>
+              </article>
+
+              <article class="kpi-card kpi-card-wide">
+                <span>Maior concentracao</span>
+                <strong id="report-top-city-value">-</strong>
+                <small id="report-top-city-note">Sem dados suficientes</small>
+              </article>
+
+              <article class="kpi-card kpi-card-wide">
+                <span>Pontos compartilhados</span>
+                <strong id="report-shared-value">0</strong>
+                <small id="report-shared-note">Clientes no mesmo ponto</small>
+              </article>
+            </section>
+
+            <section class="report-grid" aria-label="Graficos de concentracao">
+              <article class="report-card report-card-large">
+                <div class="report-card-header">
+                  <div>
+                    <span>Ranking territorial</span>
+                    <h3>Municipios por concentracao</h3>
+                  </div>
+                  <strong id="report-top-caption">Top 8</strong>
                 </div>
-              </div>
-              <div id="report-density-list" class="density-list"></div>
-            </article>
+                <div id="chart-top-cities" class="bar-chart"></div>
+              </article>
+
+              <article class="report-card">
+                <div class="report-card-header">
+                  <div>
+                    <span>Carteira</span>
+                    <h3>Situacao cadastral</h3>
+                  </div>
+                </div>
+                <div id="chart-status" class="status-chart"></div>
+              </article>
+
+              <article class="report-card">
+                <div class="report-card-header">
+                  <div>
+                    <span>Distribuicao</span>
+                    <h3>Clientes por UF</h3>
+                  </div>
+                </div>
+                <div id="chart-uf" class="bar-chart compact"></div>
+              </article>
+
+              <article class="report-card">
+                <div class="report-card-header">
+                  <div>
+                    <span>Precisao visual</span>
+                    <h3>Clientes por ponto</h3>
+                  </div>
+                </div>
+                <div id="chart-coordinate-groups" class="column-chart"></div>
+              </article>
+
+              <article class="report-card report-card-large">
+                <div class="report-card-header">
+                  <div>
+                    <span>Indice de oportunidade</span>
+                    <h3>Hotspots de clientes</h3>
+                  </div>
+                </div>
+                <div id="report-density-list" class="density-list"></div>
+              </article>
+            </section>
+          </section>
+
+          <section id="report-section-territory" class="report-tab-panel" data-report-panel="territory">
+            <section class="report-grid" aria-label="Analise territorial detalhada">
+              <article class="report-card report-card-large">
+                <div class="report-card-header">
+                  <div>
+                    <span>Ranking refinado</span>
+                    <h3>Bairros com maior presenca</h3>
+                  </div>
+                  <strong id="report-district-caption">Top 10</strong>
+                </div>
+                <div id="chart-top-districts" class="bar-chart"></div>
+              </article>
+
+              <article class="report-card">
+                <div class="report-card-header">
+                  <div>
+                    <span>Ruas</span>
+                    <h3>Logradouros mais fortes</h3>
+                  </div>
+                </div>
+                <div id="chart-top-streets" class="bar-chart compact"></div>
+              </article>
+
+              <article class="report-card report-card-large">
+                <div class="report-card-header">
+                  <div>
+                    <span>Tabela executiva</span>
+                    <h3>Ranking de municipios</h3>
+                  </div>
+                </div>
+                <div id="report-ranking-table" class="report-table-wrap"></div>
+              </article>
+
+              <article class="report-card">
+                <div class="report-card-header">
+                  <div>
+                    <span>Cobertura</span>
+                    <h3>UFs por alcance</h3>
+                  </div>
+                </div>
+                <div id="report-coverage-table" class="report-table-wrap"></div>
+              </article>
+            </section>
+          </section>
+
+          <section id="report-section-quality" class="report-tab-panel" data-report-panel="quality">
+            <section class="report-grid" aria-label="Qualidade e leitura operacional">
+              <article class="report-card report-card-large">
+                <div class="report-card-header">
+                  <div>
+                    <span>Leitura executiva</span>
+                    <h3>Insights automaticos</h3>
+                  </div>
+                </div>
+                <div id="report-insights" class="insight-list"></div>
+              </article>
+
+              <article class="report-card">
+                <div class="report-card-header">
+                  <div>
+                    <span>Geocodificacao</span>
+                    <h3>Precisao da base</h3>
+                  </div>
+                </div>
+                <div id="chart-geocode-quality" class="bar-chart compact"></div>
+              </article>
+
+              <article class="report-card report-card-large">
+                <div class="report-card-header">
+                  <div>
+                    <span>Consistencia</span>
+                    <h3>Campos criticos</h3>
+                  </div>
+                </div>
+                <div id="report-quality-table" class="report-table-wrap"></div>
+              </article>
+
+              <article class="report-card">
+                <div class="report-card-header">
+                  <div>
+                    <span>Atividade</span>
+                    <h3>CNAEs mais frequentes</h3>
+                  </div>
+                </div>
+                <div id="chart-cnae" class="bar-chart compact"></div>
+              </article>
+            </section>
           </section>
         </div>
       </div>
@@ -516,6 +660,6 @@
   <script src="https://unpkg.com/maplibre-gl@5/dist/maplibre-gl.js"></script>
   <script src="https://unpkg.com/@maplibre/maplibre-gl-leaflet/leaflet-maplibre-gl.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
-  <script src="./app.js?v=20260815-search-boundary1"></script>
+  <script src="./app.js?v=20260815-bi-area1"></script>
 </body>
 </html>

@@ -114,6 +114,11 @@ select:focus-visible {
   will-change: opacity, transform;
 }
 
+.area-selection-shape {
+  filter: drop-shadow(0 5px 14px rgba(0, 122, 255, 0.16));
+  pointer-events: none;
+}
+
 .map.is-heat-mode .leaflet-heatmap-layer {
   opacity: 0.98;
 }
@@ -580,6 +585,14 @@ select:focus-visible {
   line-height: 1;
 }
 
+.result-pill.is-area-scoped {
+  border-color: rgba(36, 138, 61, 0.22);
+  background: rgba(233, 248, 238, 0.9);
+  box-shadow:
+    0 8px 24px rgba(36, 138, 61, 0.12),
+    var(--shadow-sm);
+}
+
 .filter-actions {
   flex: 0 0 auto;
   display: inline-flex;
@@ -829,6 +842,132 @@ select:focus-visible {
   -webkit-overflow-scrolling: touch;
   padding: 16px;
   overscroll-behavior: contain;
+}
+
+.report-command-strip {
+  display: grid;
+  grid-template-columns: minmax(240px, 0.86fr) minmax(0, 1.14fr);
+  gap: 12px;
+  margin-bottom: 12px;
+}
+
+.report-scope {
+  display: grid;
+  min-width: 0;
+  gap: 4px;
+  padding: 13px 14px;
+  border: 1px solid rgba(60, 60, 67, 0.1);
+  border-radius: 16px;
+  background:
+    linear-gradient(135deg, rgba(0, 122, 255, 0.08), rgba(36, 138, 61, 0.05)),
+    rgba(255, 255, 255, 0.78);
+}
+
+.report-scope span {
+  color: var(--text-soft);
+  font-size: 10.5px;
+  font-weight: 760;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+
+.report-scope strong {
+  overflow: hidden;
+  color: var(--text);
+  font-size: 16px;
+  font-weight: 780;
+  line-height: 1.2;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.report-scope small {
+  color: var(--text-soft);
+  font-size: 12px;
+  line-height: 1.35;
+}
+
+.report-actions {
+  display: flex;
+  min-width: 0;
+  flex-wrap: wrap;
+  align-content: stretch;
+  align-items: stretch;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.report-action-button {
+  min-height: 38px;
+  padding: 0 12px;
+  border: 1px solid rgba(60, 60, 67, 0.12);
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.76);
+  color: var(--text);
+  font-size: 12.5px;
+  font-weight: 720;
+  box-shadow: 0 6px 16px rgba(0, 0, 0, 0.045);
+  cursor: pointer;
+  transition: transform 160ms ease, border-color 160ms ease, background 160ms ease;
+}
+
+.report-action-button:hover {
+  border-color: rgba(0, 122, 255, 0.28);
+  background: rgba(255, 255, 255, 0.94);
+}
+
+.report-action-button:active {
+  transform: scale(0.97);
+}
+
+.report-action-button:disabled {
+  cursor: not-allowed;
+  opacity: 0.46;
+  transform: none;
+}
+
+.report-action-button.is-primary {
+  border-color: rgba(0, 122, 255, 0.28);
+  background: rgba(0, 122, 255, 0.1);
+  color: var(--accent-strong);
+}
+
+.report-tabs {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 4px;
+  margin-bottom: 12px;
+  padding: 4px;
+  border: 1px solid rgba(60, 60, 67, 0.1);
+  border-radius: 14px;
+  background: rgba(118, 118, 128, 0.09);
+}
+
+.report-tab {
+  display: grid;
+  min-width: 0;
+  height: 36px;
+  place-items: center;
+  border-radius: 10px;
+  background: transparent;
+  color: var(--text-soft);
+  font-size: 12.5px;
+  font-weight: 740;
+  cursor: pointer;
+}
+
+.report-tab.is-active {
+  background: rgba(255, 255, 255, 0.9);
+  color: var(--text);
+  box-shadow: 0 5px 14px rgba(0, 0, 0, 0.06);
+}
+
+.report-tab-panel {
+  display: none;
+}
+
+.report-tab-panel.is-active {
+  display: block;
 }
 
 .report-kpis {
@@ -1194,6 +1333,106 @@ select:focus-visible {
   color: var(--text-soft);
   font-size: 12.5px;
   text-align: center;
+}
+
+.report-table-wrap {
+  min-width: 0;
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+  border: 1px solid rgba(60, 60, 67, 0.08);
+  border-radius: 14px;
+  background: rgba(248, 248, 250, 0.62);
+}
+
+.report-table {
+  width: 100%;
+  min-width: 560px;
+  border-collapse: collapse;
+}
+
+.report-table th,
+.report-table td {
+  padding: 10px 11px;
+  border-bottom: 1px solid rgba(60, 60, 67, 0.08);
+  color: var(--text);
+  font-size: 12px;
+  line-height: 1.35;
+  text-align: left;
+  vertical-align: middle;
+}
+
+.report-table th {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  background: rgba(255, 255, 255, 0.94);
+  color: var(--text-soft);
+  font-size: 10.5px;
+  font-weight: 780;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.report-table tr:last-child td {
+  border-bottom: 0;
+}
+
+.report-table td:not(:nth-child(2)) {
+  font-variant-numeric: tabular-nums;
+}
+
+.insight-list {
+  display: grid;
+  gap: 9px;
+}
+
+.insight-row {
+  display: grid;
+  grid-template-columns: 10px minmax(0, 1fr);
+  gap: 11px;
+  padding: 12px;
+  border: 1px solid rgba(60, 60, 67, 0.09);
+  border-radius: 14px;
+  background: rgba(248, 248, 250, 0.68);
+}
+
+.insight-marker {
+  width: 10px;
+  height: 100%;
+  min-height: 34px;
+  border-radius: 999px;
+  background: var(--inactive);
+}
+
+.insight-row.is-focus .insight-marker {
+  background: var(--accent);
+}
+
+.insight-row.is-success .insight-marker {
+  background: var(--success);
+}
+
+.insight-row.is-warning .insight-marker {
+  background: var(--warning);
+}
+
+.insight-row strong,
+.insight-row small {
+  display: block;
+}
+
+.insight-row strong {
+  color: var(--text);
+  font-size: 13px;
+  font-weight: 760;
+  line-height: 1.25;
+}
+
+.insight-row small {
+  margin-top: 3px;
+  color: var(--text-soft);
+  font-size: 12px;
+  line-height: 1.4;
 }
 
 .client-panel {
@@ -2165,6 +2404,18 @@ select:focus-visible {
     padding: 12px;
   }
 
+  .report-command-strip {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .report-actions {
+    justify-content: flex-start;
+  }
+
+  .report-action-button {
+    flex: 1 1 132px;
+  }
+
   .report-kpis {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
@@ -2469,6 +2720,46 @@ select:focus-visible {
     line-height: 1.35;
   }
 
+  .report-command-strip {
+    gap: 8px;
+    margin-bottom: 9px;
+  }
+
+  .report-scope {
+    padding: 11px 12px;
+    border-radius: 14px;
+  }
+
+  .report-scope strong {
+    font-size: 14px;
+  }
+
+  .report-scope small {
+    font-size: 11px;
+  }
+
+  .report-actions {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 7px;
+  }
+
+  .report-action-button {
+    width: 100%;
+    min-height: 36px;
+    padding: 0 8px;
+    font-size: 11.5px;
+  }
+
+  .report-tabs {
+    margin-bottom: 9px;
+  }
+
+  .report-tab {
+    height: 34px;
+    font-size: 11.5px;
+  }
+
   .report-kpis {
     grid-template-columns: minmax(0, 1fr);
     gap: 8px;
@@ -2507,6 +2798,16 @@ select:focus-visible {
 
   .column-track {
     min-height: 112px;
+  }
+
+  .report-table {
+    min-width: 520px;
+  }
+
+  .report-table th,
+  .report-table td {
+    padding: 9px;
+    font-size: 11.5px;
   }
 
   .map-controls {

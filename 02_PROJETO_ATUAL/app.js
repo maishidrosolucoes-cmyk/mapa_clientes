@@ -20,7 +20,7 @@
     PAGE_SIZE: 1000
   });
 
-  const APP_VERSION_FALLBACK = "20260815-search-boundary1";
+  const APP_VERSION_FALLBACK = "20260815-bi-area1";
   const APP_VERSION = getCurrentAppVersion();
   const VERSION_CHECK = Object.freeze({
     URL: "./version.json",
@@ -248,6 +248,7 @@
     markerLayer: null,
     heatLayer: null,
     territoryLayer: null,
+    areaLayer: null,
     heatPoints: [],
     selectedLayer: null,
     baseLayers: {},
@@ -264,6 +265,8 @@
     viewMode: "markers",
     baseMode: BASE_LAYER.OSM,
     reportOpen: false,
+    reportTab: "overview",
+    areaSelection: null,
     filters: {
       uf: "",
       municipio: "",
@@ -361,10 +364,23 @@
       "report-panel",
       "close-report",
       "report-context",
+      "report-scope-label",
+      "report-scope-note",
+      "report-select-visible-area",
+      "report-fit-area",
+      "report-clear-area",
+      "report-export-filtered",
+      "report-export-area",
+      "report-export-hotspots",
+      "report-tabs",
       "report-total-value",
       "report-total-note",
       "report-coverage-value",
       "report-coverage-note",
+      "report-active-value",
+      "report-active-note",
+      "report-unmapped-value",
+      "report-unmapped-note",
       "report-cities-value",
       "report-cities-note",
       "report-states-value",
@@ -380,6 +396,18 @@
       "chart-uf",
       "chart-coordinate-groups",
       "report-density-list",
+      "report-section-overview",
+      "report-section-territory",
+      "report-section-quality",
+      "report-district-caption",
+      "chart-top-districts",
+      "chart-top-streets",
+      "report-ranking-table",
+      "report-coverage-table",
+      "report-insights",
+      "chart-geocode-quality",
+      "report-quality-table",
+      "chart-cnae",
       "app-status",
       "status-spinner",
       "status-title",
@@ -505,6 +533,7 @@
       interactive: false,
       style: getTerritoryStyle
     }).addTo(state.map);
+    state.areaLayer = L.layerGroup().addTo(state.map);
 
     state.map.on("click", (event) => {
       setRegionTarget(event.latlng, getClickRegionSource());
@@ -645,6 +674,13 @@
     dom.copyClient.addEventListener("click", copySelectedClient);
     dom.openReport.addEventListener("click", openReportPanel);
     dom.closeReport.addEventListener("click", closeReportPanel);
+    dom.reportSelectVisibleArea.addEventListener("click", selectVisibleMapArea);
+    dom.reportFitArea.addEventListener("click", fitAreaSelection);
+    dom.reportClearArea.addEventListener("click", () => clearAreaSelection({ apply: true }));
+    dom.reportExportFiltered.addEventListener("click", exportFilteredClients);
+    dom.reportExportArea.addEventListener("click", exportAreaClients);
+    dom.reportExportHotspots.addEventListener("click", exportHotspots);
+    dom.reportTabs.addEventListener("click", handleReportTabClick);
     dom.modalBackdrop.addEventListener("click", closeTopModal);
 
     dom.statusAction.addEventListener("click", connectAndLoad);
@@ -700,6 +736,8 @@
     dom.reportPanel.setAttribute("aria-hidden", "false");
     dom.openReport.setAttribute("aria-expanded", "true");
     syncModalBackdrop();
+    syncReportTabs();
+    syncAreaSelectionUi();
     renderReport();
   }
 
@@ -730,6 +768,33 @@
     dom.modalBackdrop.classList.toggle("is-visible", hasActiveModal);
   }
 
+  function handleReportTabClick(event) {
+    const button = event.target.closest("[data-report-tab]");
+    if (!button) return;
+    setReportTab(button.dataset.reportTab);
+  }
+
+  function setReportTab(tab) {
+    if (!["overview", "territory", "quality"].includes(tab)) return;
+    state.reportTab = tab;
+    syncReportTabs();
+  }
+
+  function syncReportTabs() {
+    const tabs = dom.reportTabs.querySelectorAll("[data-report-tab]");
+    const panels = dom.reportPanel.querySelectorAll("[data-report-panel]");
+
+    tabs.forEach((button) => {
+      const active = button.dataset.reportTab === state.reportTab;
+      button.classList.toggle("is-active", active);
+      button.setAttribute("aria-pressed", String(active));
+    });
+
+    panels.forEach((panel) => {
+      panel.classList.toggle("is-active", panel.dataset.reportPanel === state.reportTab);
+    });
+  }
+
   function renderReport() {
     if (!dom.reportPanel) return;
 
@@ -737,10 +802,15 @@
     const total = clients.length;
     const baseTotal = state.clients.length;
     const mapped = clients.filter((client) => client.hasValidCoordinates).length;
+    const unmapped = total - mapped;
     const active = clients.filter(
       (client) => normalizeSearchText(client.situacao) === "ativa"
     ).length;
     const cityEntries = getLocationEntries(clients);
+    const districtEntries = getDistrictEntries(clients);
+    const streetEntries = getStreetEntries(clients);
+    const geocodeEntries = getGeocodePrecisionEntries(clients);
+    const cnaeEntries = getCnaeEntries(clients);
     const ufEntries = getCountEntries(
       clients,
       (client) => client.uf,
@@ -754,10 +824,13 @@
     const coordinateStats = getCoordinateDistribution(clients);
     const topCity = cityEntries[0];
     const hasScopedFilters =
+      Boolean(state.areaSelection) ||
       Boolean(state.searchQuery) ||
       Boolean(state.filters.uf) ||
       Boolean(state.filters.municipio) ||
       Boolean(state.filters.situacao);
+
+    syncAreaSelectionUi();
 
     dom.reportContext.textContent = baseTotal
       ? `${formatNumber(total)} de ${formatNumber(baseTotal)} clientes analisados ${
@@ -773,6 +846,14 @@
 
     dom.reportCoverageValue.textContent = formatPercent(mapped, total);
     dom.reportCoverageNote.textContent = `${formatNumber(mapped)} ponto(s) com coordenada`;
+
+    dom.reportActiveValue.textContent = formatPercent(active, total);
+    dom.reportActiveNote.textContent = `${formatNumber(active)} cliente(s) ativos`;
+
+    dom.reportUnmappedValue.textContent = formatNumber(unmapped);
+    dom.reportUnmappedNote.textContent = unmapped
+      ? `${formatPercent(unmapped, total)} da selecao sem mapa`
+      : "Todos os clientes mapeados";
 
     dom.reportCitiesValue.textContent = formatNumber(cityEntries.length);
     dom.reportCitiesNote.textContent =
@@ -796,6 +877,9 @@
     dom.reportTopCaption.textContent = cityEntries.length
       ? `Top ${Math.min(8, cityEntries.length)}`
       : "Sem dados";
+    dom.reportDistrictCaption.textContent = districtEntries.length
+      ? `Top ${Math.min(10, districtEntries.length)}`
+      : "Sem dados";
 
     renderBarChart(dom.chartTopCities, cityEntries.slice(0, 8), total, {
       emptyText: "Sem municipios para exibir."
@@ -807,6 +891,33 @@
     });
     renderCoordinateChart(dom.chartCoordinateGroups, coordinateStats);
     renderDensityList(dom.reportDensityList, cityEntries.slice(0, 6), total);
+    renderBarChart(dom.chartTopDistricts, districtEntries.slice(0, 10), total, {
+      emptyText: "Sem bairros para exibir."
+    });
+    renderBarChart(dom.chartTopStreets, streetEntries.slice(0, 8), total, {
+      compact: true,
+      emptyText: "Sem logradouros para exibir."
+    });
+    renderRankingTable(dom.reportRankingTable, cityEntries.slice(0, 14), total);
+    renderCoverageTable(dom.reportCoverageTable, ufEntries.slice(0, 12), clients);
+    renderInsights(dom.reportInsights, buildReportInsights({
+      total,
+      mapped,
+      unmapped,
+      active,
+      cityEntries,
+      districtEntries,
+      coordinateStats
+    }));
+    renderBarChart(dom.chartGeocodeQuality, geocodeEntries.slice(0, 8), total, {
+      compact: true,
+      emptyText: "Sem classificacao de precisao."
+    });
+    renderQualityTable(dom.reportQualityTable, getFieldQualityRows(clients, total));
+    renderBarChart(dom.chartCnae, cnaeEntries.slice(0, 8), total, {
+      compact: true,
+      emptyText: "Sem CNAEs para exibir."
+    });
   }
 
   function getLocationEntries(clients) {
@@ -832,6 +943,88 @@
     }
 
     return sortReportEntries(Array.from(groups.values()));
+  }
+
+  function getDistrictEntries(clients) {
+    const groups = new Map();
+
+    for (const client of clients) {
+      const bairro = cleanValue(client.bairro);
+      if (!bairro) continue;
+
+      const municipio = cleanValue(client.municipio);
+      const uf = cleanValue(client.uf);
+      const key = `${normalizeLookupText(bairro)}|${normalizeLookupText(municipio)}|${uf}`;
+      const location = [municipio, uf].filter(Boolean).join(" - ");
+      const entry = groups.get(key) || {
+        key,
+        label: location ? `${bairro} - ${location}` : bairro,
+        count: 0,
+        active: 0,
+        mapped: 0
+      };
+
+      entry.count += 1;
+      if (client.hasValidCoordinates) entry.mapped += 1;
+      if (normalizeSearchText(client.situacao) === "ativa") entry.active += 1;
+      groups.set(key, entry);
+    }
+
+    return sortReportEntries(Array.from(groups.values()));
+  }
+
+  function getStreetEntries(clients) {
+    const groups = new Map();
+
+    for (const client of clients) {
+      const street = cleanValue(client.logradouro);
+      if (!street) continue;
+
+      const bairro = cleanValue(client.bairro);
+      const municipio = cleanValue(client.municipio);
+      const uf = cleanValue(client.uf);
+      const key = [
+        normalizeLookupText(street),
+        normalizeLookupText(bairro),
+        normalizeLookupText(municipio),
+        uf
+      ].join("|");
+      const location = [bairro, municipio, uf].filter(Boolean).join(" - ");
+      const entry = groups.get(key) || {
+        key,
+        label: location ? `${street} - ${location}` : street,
+        count: 0,
+        active: 0,
+        mapped: 0
+      };
+
+      entry.count += 1;
+      if (client.hasValidCoordinates) entry.mapped += 1;
+      if (normalizeSearchText(client.situacao) === "ativa") entry.active += 1;
+      groups.set(key, entry);
+    }
+
+    return sortReportEntries(Array.from(groups.values()));
+  }
+
+  function getGeocodePrecisionEntries(clients) {
+    return getCountEntries(
+      clients,
+      (client) => getPrecisionMeta(client.geocodeStatus).title,
+      "Precisao nao classificada"
+    );
+  }
+
+  function getPrecisionMeta(status) {
+    return PRECISION_META[status] || PRECISION_META.SEM_STATUS;
+  }
+
+  function getCnaeEntries(clients) {
+    return getCountEntries(
+      clients,
+      (client) => client.cnae,
+      "Sem atividade"
+    );
   }
 
   function getCountEntries(clients, getter, fallbackLabel) {
@@ -1084,6 +1277,410 @@
       row.append(rank, copy, score);
       container.appendChild(row);
     });
+  }
+
+  function renderRankingTable(container, entries, total) {
+    container.replaceChildren();
+
+    if (!entries.length || !total) {
+      container.appendChild(createReportEmpty("Sem ranking para exibir."));
+      return;
+    }
+
+    const table = createReportTable([
+      "Pos.",
+      "Municipio",
+      "Clientes",
+      "Ativos",
+      "Mapa",
+      "Part."
+    ]);
+
+    const tbody = table.querySelector("tbody");
+    entries.forEach((entry, index) => {
+      const row = document.createElement("tr");
+      [
+        String(index + 1).padStart(2, "0"),
+        entry.label,
+        formatNumber(entry.count),
+        formatPercent(entry.active || 0, entry.count),
+        formatPercent(entry.mapped || 0, entry.count),
+        formatPercent(entry.count, total)
+      ].forEach((value) => {
+        const cell = document.createElement("td");
+        cell.textContent = value;
+        row.appendChild(cell);
+      });
+      tbody.appendChild(row);
+    });
+
+    container.appendChild(table);
+  }
+
+  function renderCoverageTable(container, entries, clients) {
+    container.replaceChildren();
+
+    if (!entries.length || !clients.length) {
+      container.appendChild(createReportEmpty("Sem UFs para avaliar."));
+      return;
+    }
+
+    const table = createReportTable(["UF", "Clientes", "Cidades", "Mapa"]);
+    const tbody = table.querySelector("tbody");
+
+    entries.forEach((entry) => {
+      const ufClients = clients.filter((client) =>
+        entry.label === "Sem UF" ? !client.uf : client.uf === entry.label
+      );
+      const cityCount = uniqueSorted(ufClients.map((client) => client.municipio)).length;
+      const mapped = ufClients.filter((client) => client.hasValidCoordinates).length;
+      const row = document.createElement("tr");
+
+      [
+        entry.label,
+        formatNumber(entry.count),
+        formatNumber(cityCount),
+        formatPercent(mapped, entry.count)
+      ].forEach((value) => {
+        const cell = document.createElement("td");
+        cell.textContent = value;
+        row.appendChild(cell);
+      });
+
+      tbody.appendChild(row);
+    });
+
+    container.appendChild(table);
+  }
+
+  function renderQualityTable(container, rows) {
+    container.replaceChildren();
+
+    if (!rows.length) {
+      container.appendChild(createReportEmpty("Sem campos para avaliar."));
+      return;
+    }
+
+    const table = createReportTable(["Campo", "Ausentes", "Cobertura"]);
+    const tbody = table.querySelector("tbody");
+
+    rows.forEach((item) => {
+      const row = document.createElement("tr");
+      [item.label, formatNumber(item.missing), item.coverage].forEach((value) => {
+        const cell = document.createElement("td");
+        cell.textContent = value;
+        row.appendChild(cell);
+      });
+      tbody.appendChild(row);
+    });
+
+    container.appendChild(table);
+  }
+
+  function createReportTable(headers) {
+    const table = document.createElement("table");
+    table.className = "report-table";
+
+    const thead = document.createElement("thead");
+    const headRow = document.createElement("tr");
+    headers.forEach((header) => {
+      const cell = document.createElement("th");
+      cell.scope = "col";
+      cell.textContent = header;
+      headRow.appendChild(cell);
+    });
+    thead.appendChild(headRow);
+
+    const tbody = document.createElement("tbody");
+    table.append(thead, tbody);
+    return table;
+  }
+
+  function renderInsights(container, insights) {
+    container.replaceChildren();
+
+    if (!insights.length) {
+      container.appendChild(createReportEmpty("Sem insights para a selecao atual."));
+      return;
+    }
+
+    insights.forEach((insight) => {
+      const row = document.createElement("div");
+      row.className = `insight-row ${insight.tone ? `is-${insight.tone}` : ""}`.trim();
+
+      const marker = document.createElement("span");
+      marker.className = "insight-marker";
+      marker.setAttribute("aria-hidden", "true");
+
+      const copy = document.createElement("div");
+      const title = document.createElement("strong");
+      title.textContent = insight.title;
+      const text = document.createElement("small");
+      text.textContent = insight.text;
+      copy.append(title, text);
+
+      row.append(marker, copy);
+      container.appendChild(row);
+    });
+  }
+
+  function buildReportInsights({
+    total,
+    mapped,
+    unmapped,
+    active,
+    cityEntries,
+    districtEntries,
+    coordinateStats
+  }) {
+    if (!total) return [];
+
+    const insights = [];
+    const topCity = cityEntries[0];
+    const topDistrict = districtEntries[0];
+
+    if (state.areaSelection) {
+      insights.push({
+        tone: "focus",
+        title: "Recorte espacial ativo",
+        text: `${formatNumber(total)} cliente(s) estao sendo analisados dentro da area selecionada.`
+      });
+    }
+
+    if (topCity) {
+      insights.push({
+        tone: "focus",
+        title: "Concentracao principal",
+        text: `${topCity.label} concentra ${formatPercent(topCity.count, total)} da selecao.`
+      });
+    }
+
+    if (topDistrict) {
+      insights.push({
+        tone: "neutral",
+        title: "Bairro de maior presenca",
+        text: `${topDistrict.label} aparece com ${formatNumber(topDistrict.count)} cliente(s).`
+      });
+    }
+
+    if (unmapped) {
+      insights.push({
+        tone: "warning",
+        title: "Coordenadas pendentes",
+        text: `${formatNumber(unmapped)} registro(s) nao aparecem no mapa e reduzem a leitura territorial.`
+      });
+    } else if (mapped) {
+      insights.push({
+        tone: "success",
+        title: "Cobertura geografica completa",
+        text: "Todos os clientes da selecao possuem coordenadas validas."
+      });
+    }
+
+    if (coordinateStats.sharedClients) {
+      insights.push({
+        tone: "warning",
+        title: "Pontos com alta sobreposicao",
+        text: `${formatNumber(coordinateStats.sharedClients)} cliente(s) dividem coordenadas com outros registros.`
+      });
+    }
+
+    insights.push({
+      tone: active / total >= 0.75 ? "success" : "neutral",
+      title: "Carteira ativa",
+      text: `${formatPercent(active, total)} dos clientes analisados estao ativos.`
+    });
+
+    return insights.slice(0, 6);
+  }
+
+  function getFieldQualityRows(clients, total) {
+    if (!total) return [];
+
+    return [
+      {
+        label: "Coordenada",
+        missing: clients.filter((client) => !client.hasValidCoordinates).length
+      },
+      {
+        label: "CNPJ",
+        missing: clients.filter((client) => !client.cnpj).length
+      },
+      {
+        label: "Logradouro",
+        missing: clients.filter((client) => !client.logradouro).length
+      },
+      {
+        label: "Bairro",
+        missing: clients.filter((client) => !client.bairro).length
+      },
+      {
+        label: "Telefone",
+        missing: clients.filter((client) => !client.telefone && !client.telefone1).length
+      },
+      {
+        label: "CNAE",
+        missing: clients.filter((client) => !client.cnae).length
+      }
+    ].map((item) => ({
+      ...item,
+      coverage: formatPercent(total - item.missing, total)
+    }));
+  }
+
+  function getReportScopeLabel() {
+    if (state.searchQuery) return `Busca: ${state.searchQuery}`;
+
+    const parts = [
+      state.filters.uf ? `UF ${state.filters.uf}` : "",
+      state.filters.municipio || "",
+      state.filters.situacao || ""
+    ].filter(Boolean);
+
+    return parts.length ? parts.join(" / ") : "Base completa";
+  }
+
+  function getReportScopeNote() {
+    const total = state.filteredClients.length;
+    const baseTotal = state.clients.length;
+    return baseTotal
+      ? `${formatNumber(total)} de ${formatNumber(baseTotal)} cliente(s) no escopo atual.`
+      : "Carregue a base para gerar os indicadores.";
+  }
+
+  function exportFilteredClients() {
+    exportClientsCsv(state.filteredClients, "clientes_filtrados");
+  }
+
+  function exportAreaClients() {
+    if (!state.areaSelection) {
+      showToast("Selecione uma area visivel antes de exportar.");
+      return;
+    }
+
+    exportClientsCsv(state.filteredClients, "clientes_area_visivel");
+  }
+
+  function exportHotspots() {
+    const clients = state.filteredClients || [];
+    const entries = getLocationEntries(clients);
+
+    if (!entries.length) {
+      showToast("Nao ha hotspots para exportar.");
+      return;
+    }
+
+    const rows = entries.map((entry, index) => ({
+      ranking: index + 1,
+      municipio: entry.label,
+      clientes: entry.count,
+      ativos: entry.active || 0,
+      com_coordenada: entry.mapped || 0,
+      participacao: formatPercent(entry.count, clients.length)
+    }));
+
+    downloadCsv("hotspots_clientes", rows, [
+      "ranking",
+      "municipio",
+      "clientes",
+      "ativos",
+      "com_coordenada",
+      "participacao"
+    ]);
+  }
+
+  function exportClientsCsv(clients, token) {
+    const rows = (clients || []).map((client) => ({
+      cnpj: client.cnpj,
+      razao_social: client.razaoSocial,
+      nome_fantasia: client.nomeFantasia,
+      situacao: client.situacao,
+      uf: client.uf,
+      municipio: client.municipio,
+      bairro: client.bairro,
+      logradouro: client.logradouro,
+      cep: formatCep(client.cep),
+      telefone: uniqueSorted([client.telefone, client.telefone1].filter(Boolean).map(formatPhone)).join(" | "),
+      cnae: client.cnae,
+      geocode_status: client.geocodeStatus,
+      precisao: getPrecisionMeta(client.geocodeStatus).title,
+      latitude: client.hasValidCoordinates ? String(client.latitude) : "",
+      longitude: client.hasValidCoordinates ? String(client.longitude) : "",
+      ponto_visual_latitude: client.hasValidCoordinates ? String(client.visualLatitude) : "",
+      ponto_visual_longitude: client.hasValidCoordinates ? String(client.visualLongitude) : "",
+      clientes_no_mesmo_ponto: client.visualGroupSize || 0,
+      google_maps: buildGoogleMapsUrl(client)
+    }));
+
+    if (!rows.length) {
+      showToast("Nao ha clientes para exportar neste escopo.");
+      return;
+    }
+
+    downloadCsv(token, rows, [
+      "cnpj",
+      "razao_social",
+      "nome_fantasia",
+      "situacao",
+      "uf",
+      "municipio",
+      "bairro",
+      "logradouro",
+      "cep",
+      "telefone",
+      "cnae",
+      "geocode_status",
+      "precisao",
+      "latitude",
+      "longitude",
+      "ponto_visual_latitude",
+      "ponto_visual_longitude",
+      "clientes_no_mesmo_ponto",
+      "google_maps"
+    ]);
+  }
+
+  function downloadCsv(token, rows, columns) {
+    const csv = serializeCsv(rows, columns);
+    const blob = new Blob(["\ufeff", csv], {
+      type: "text/csv;charset=utf-8"
+    });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+
+    link.href = url;
+    link.download = `${token}_${getExportDateStamp()}.csv`;
+    link.style.display = "none";
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+
+    window.setTimeout(() => URL.revokeObjectURL(url), 250);
+    showToast("CSV gerado com sucesso.");
+  }
+
+  function serializeCsv(rows, columns) {
+    const header = columns.map(formatCsvCell).join(";");
+    const lines = rows.map((row) =>
+      columns.map((column) => formatCsvCell(row[column])).join(";")
+    );
+
+    return [header, ...lines].join("\r\n");
+  }
+
+  function formatCsvCell(value) {
+    const text = cleanValue(value).replace(/\r?\n/g, " ");
+    return `"${text.replace(/"/g, '""')}"`;
+  }
+
+  function getExportDateStamp() {
+    const now = new Date();
+    const pad = (value) => String(value).padStart(2, "0");
+    return [
+      now.getFullYear(),
+      pad(now.getMonth() + 1),
+      pad(now.getDate())
+    ].join("");
   }
 
   function createReportEmpty(text) {
@@ -1871,11 +2468,13 @@
       ) {
         return false;
       }
+      if (state.areaSelection && !isClientInsideAreaSelection(client)) return false;
       if (query && !matchesSearchIntent(client, query, searchIntent)) return false;
       return true;
     });
 
     dom.resultCount.textContent = formatNumber(state.filteredClients.length);
+    syncAreaSelectionUi();
 
     refreshMapLayers();
 
@@ -2081,6 +2680,133 @@
       lineCap: "round",
       lineJoin: "round"
     };
+  }
+
+  function selectVisibleMapArea() {
+    if (!state.map) return;
+
+    const bounds = state.map.getBounds();
+    const mappable = state.clients.filter((client) =>
+      client.hasValidCoordinates && bounds.contains([client.visualLatitude, client.visualLongitude])
+    );
+
+    if (!mappable.length) {
+      showToast("A area visivel nao tem clientes com coordenadas.");
+      return;
+    }
+
+    state.areaSelection = {
+      bounds: serializeLatLngBounds(bounds),
+      label: buildAreaSelectionLabel(bounds, mappable.length),
+      createdAt: Date.now()
+    };
+
+    drawAreaSelection();
+    applyFilters({ fit: false });
+    showToast(`Area visivel aplicada: ${formatNumber(mappable.length)} cliente(s) no recorte.`);
+  }
+
+  function clearAreaSelection({ apply = false, silent = false } = {}) {
+    state.areaSelection = null;
+    drawAreaSelection();
+    syncAreaSelectionUi();
+
+    if (apply) {
+      applyFilters({ fit: false });
+      if (!silent) showToast("Recorte por area removido.");
+    }
+  }
+
+  function fitAreaSelection() {
+    if (!state.map || !state.areaSelection) return;
+
+    const bounds = getAreaSelectionLatLngBounds();
+    if (!bounds?.isValid?.()) return;
+
+    state.map.fitBounds(bounds, {
+      paddingTopLeft: [28, 150],
+      paddingBottomRight: [28, 44],
+      animate: !prefersReducedMotion(),
+      duration: 0.45
+    });
+  }
+
+  function syncAreaSelectionUi() {
+    const active = Boolean(state.areaSelection);
+
+    dom.reportFitArea.disabled = !active;
+    dom.reportClearArea.disabled = !active;
+    dom.reportExportArea.disabled = !active;
+    dom.resultPill.classList.toggle("is-area-scoped", active);
+    dom.resultPill.title = active
+      ? "Clientes dentro da area visivel selecionada"
+      : "";
+
+    dom.reportScopeLabel.textContent = active
+      ? "Area visivel selecionada"
+      : getReportScopeLabel();
+    dom.reportScopeNote.textContent = active
+      ? state.areaSelection.label
+      : getReportScopeNote();
+  }
+
+  function drawAreaSelection() {
+    if (!state.areaLayer || !window.L) return;
+
+    state.areaLayer.clearLayers();
+    if (!state.areaSelection) return;
+
+    const bounds = getAreaSelectionLatLngBounds();
+    if (!bounds?.isValid?.()) return;
+
+    L.rectangle(bounds, {
+      interactive: false,
+      className: "area-selection-shape",
+      color: "#007aff",
+      weight: 2,
+      opacity: 0.92,
+      fillColor: "#007aff",
+      fillOpacity: 0.07,
+      dashArray: "8 7",
+      lineCap: "round",
+      lineJoin: "round"
+    }).addTo(state.areaLayer);
+  }
+
+  function serializeLatLngBounds(bounds) {
+    const southWest = bounds.getSouthWest();
+    const northEast = bounds.getNorthEast();
+
+    return {
+      south: southWest.lat,
+      west: southWest.lng,
+      north: northEast.lat,
+      east: northEast.lng
+    };
+  }
+
+  function getAreaSelectionLatLngBounds() {
+    if (!state.areaSelection?.bounds || !window.L) return null;
+
+    const bounds = state.areaSelection.bounds;
+    return L.latLngBounds(
+      [bounds.south, bounds.west],
+      [bounds.north, bounds.east]
+    );
+  }
+
+  function isClientInsideAreaSelection(client) {
+    const bounds = getAreaSelectionLatLngBounds();
+    if (!bounds || !client?.hasValidCoordinates) return false;
+    return bounds.contains([client.visualLatitude, client.visualLongitude]);
+  }
+
+  function buildAreaSelectionLabel(bounds, count) {
+    const center = bounds.getCenter();
+    const zoom = state.map?.getZoom?.() || 0;
+    const level = getRegionLevelLabel(zoom);
+
+    return `${formatNumber(count)} cliente(s) no recorte - ${level} proximo a ${center.lat.toFixed(3)}, ${center.lng.toFixed(3)}`;
   }
 
   function refreshMapLayers() {
