@@ -1,0 +1,39 @@
+# Sistema / editor
+.DS_Store
+Thumbs.db
+desktop.ini
+.vscode/
+.idea/
+
+# Ambiente local e segredos
+.env
+.env.*
+*.local
+*.secret.*
+secrets/
+
+# Dependencias / build
+node_modules/
+dist/
+build/
+.cache/
+.tmp/
+tmp/
+temp/
+*.log
+
+# Backups locais do handoff
+backup/
+backup_google_maps/
+
+# Bases comerciais e binarios de trabalho
+04_DADOS/
+*.xlsx
+*.xls
+*.csv
+*.docx
+
+# Supabase / funcoes locais
+05_EDGE_FUNCTIONS/**/.env
+05_EDGE_FUNCTIONS/**/.env.*
+

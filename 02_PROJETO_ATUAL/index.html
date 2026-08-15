@@ -1,0 +1,505 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#f5f5f7">
+  <meta name="color-scheme" content="light">
+  <meta name="description" content="Mapa de distribuição de potenciais clientes no Brasil.">
+  <title>Mapa de Clientes</title>
+
+  <link rel="preconnect" href="https://tile.openstreetmap.org">
+  <link rel="preconnect" href="https://tiles.openfreemap.org">
+  <link rel="preconnect" href="https://server.arcgisonline.com">
+  <link rel="preconnect" href="https://services.arcgisonline.com">
+  <link rel="preconnect" href="https://cdn.jsdelivr.net">
+  <link rel="preconnect" href="https://unpkg.com">
+
+  <link
+    rel="stylesheet"
+    href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
+    integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY="
+    crossorigin=""
+  >
+  <link
+    rel="stylesheet"
+    href="https://unpkg.com/leaflet.markercluster@1.5.3/dist/MarkerCluster.css"
+  >
+  <link
+    rel="stylesheet"
+    href="https://unpkg.com/leaflet.markercluster@1.5.3/dist/MarkerCluster.Default.css"
+  >
+  <link
+    rel="stylesheet"
+    href="https://unpkg.com/maplibre-gl@5/dist/maplibre-gl.css"
+  >
+  <link rel="stylesheet" href="./style.css?v=20260815-logo1">
+</head>
+
+<body>
+  <main class="app-shell" id="app">
+    <div
+      id="map"
+      class="map"
+      role="application"
+      aria-label="Mapa interativo de potenciais clientes"
+    ></div>
+
+    <header class="top-area" aria-label="Pesquisa e filtros">
+      <section class="glass-toolbar">
+        <div class="brand" aria-label="Mapa de clientes">
+          <span class="brand-mark" aria-hidden="true">
+            <img src="../logo_mhs.jpg" alt="">
+          </span>
+          <div class="brand-copy">
+            <strong>Mapa de clientes</strong>
+            <small id="data-caption">Carregando base…</small>
+          </div>
+        </div>
+
+        <div class="search-wrap">
+          <div class="search-box">
+            <svg class="search-icon" viewBox="0 0 24 24" aria-hidden="true">
+              <path d="m21 21-4.35-4.35m1.1-5.4a6.5 6.5 0 1 1-13 0 6.5 6.5 0 0 1 13 0Z"/>
+            </svg>
+
+            <input
+              id="search-input"
+              type="search"
+              inputmode="search"
+              autocomplete="off"
+              spellcheck="false"
+              placeholder="Buscar cliente, CNPJ, cidade, bairro ou CEP"
+              aria-label="Buscar clientes"
+              aria-autocomplete="list"
+              aria-controls="search-results"
+              aria-expanded="false"
+            >
+
+            <button
+              id="clear-search"
+              class="icon-button compact is-hidden"
+              type="button"
+              aria-label="Limpar pesquisa"
+              title="Limpar pesquisa"
+            >
+              <svg viewBox="0 0 24 24" aria-hidden="true">
+                <path d="M7 7l10 10M17 7 7 17"/>
+              </svg>
+            </button>
+          </div>
+
+          <div
+            id="search-results"
+            class="search-results is-hidden"
+            role="listbox"
+            aria-label="Resultados da pesquisa"
+          ></div>
+        </div>
+
+        <div class="view-toggle" role="group" aria-label="Visualização do mapa">
+          <button
+            id="view-markers"
+            class="segment-button is-active"
+            type="button"
+            data-view="markers"
+            aria-pressed="true"
+          >
+            Pontos
+          </button>
+          <button
+            id="view-heat"
+            class="segment-button"
+            type="button"
+            data-view="heat"
+            aria-pressed="false"
+          >
+            Calor
+          </button>
+        </div>
+
+        <div class="base-toggle" role="group" aria-label="Mapa base">
+          <button
+            id="base-osm"
+            class="segment-button is-active"
+            type="button"
+            data-base="osm"
+            aria-pressed="true"
+          >
+            OSM
+          </button>
+          <button
+            id="base-vector"
+            class="segment-button"
+            type="button"
+            data-base="vector"
+            aria-pressed="false"
+          >
+            Vetor
+          </button>
+          <button
+            id="base-satellite"
+            class="segment-button"
+            type="button"
+            data-base="satellite"
+            aria-pressed="false"
+            title="Satelite"
+          >
+            Sat
+          </button>
+        </div>
+      </section>
+
+      <section class="glass-filters">
+        <div class="filter-scroll" aria-label="Filtros da base">
+          <label class="select-control">
+            <span class="sr-only">Estado</span>
+            <select id="filter-uf" aria-label="Filtrar por estado">
+              <option value="">Todos os estados</option>
+            </select>
+          </label>
+
+          <label class="select-control">
+            <span class="sr-only">Município</span>
+            <select id="filter-municipio" aria-label="Filtrar por município">
+              <option value="">Todos os municípios</option>
+            </select>
+          </label>
+
+          <label class="select-control">
+            <span class="sr-only">Situação</span>
+            <select id="filter-situacao" aria-label="Filtrar por situação cadastral">
+              <option value="">Todas as situações</option>
+            </select>
+          </label>
+
+          <button id="reset-filters" class="text-button" type="button">
+            Limpar filtros
+          </button>
+        </div>
+
+        <div class="filter-actions">
+          <button
+            id="open-report"
+            class="report-tab-button"
+            type="button"
+            aria-controls="report-panel"
+            aria-expanded="false"
+            aria-haspopup="dialog"
+            title="Abrir relatorio"
+          >
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+              <path d="M4 19V5"></path>
+              <path d="M4 19h16"></path>
+              <path d="M8 16v-5"></path>
+              <path d="M13 16V8"></path>
+              <path d="M18 16v-9"></path>
+            </svg>
+            <span>Relatorio</span>
+          </button>
+
+          <div class="result-pill" id="result-pill" aria-live="polite">
+            <strong id="result-count">0</strong>
+            <span>clientes</span>
+          </div>
+        </div>
+      </section>
+    </header>
+
+    <nav class="map-controls" aria-label="Controles do mapa">
+      <button id="zoom-in" class="map-control" type="button" aria-label="Aumentar zoom" title="Aumentar zoom">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>
+      </button>
+      <button id="zoom-out" class="map-control" type="button" aria-label="Diminuir zoom" title="Diminuir zoom">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12h14"/></svg>
+      </button>
+      <span class="control-divider" aria-hidden="true"></span>
+      <button id="fit-brazil" class="map-control" type="button" aria-label="Mostrar todo o Brasil" title="Mostrar todo o Brasil">
+        <svg viewBox="0 0 24 24" aria-hidden="true">
+          <path d="M8 4H5a1 1 0 0 0-1 1v3m12-4h3a1 1 0 0 1 1 1v3M8 20H5a1 1 0 0 1-1-1v-3m12 4h3a1 1 0 0 0 1-1v-3"/>
+        </svg>
+      </button>
+    </nav>
+
+    <aside
+      id="client-panel"
+      class="client-panel"
+      aria-hidden="true"
+      aria-label="Detalhes do cliente"
+    >
+      <button
+        id="sheet-handle"
+        class="sheet-handle"
+        type="button"
+        aria-label="Expandir ou recolher ficha"
+      >
+        <span></span>
+      </button>
+
+      <div class="panel-top">
+        <div class="panel-heading">
+          <span id="client-status" class="status-badge"></span>
+          <h1 id="client-title">Cliente</h1>
+          <p id="client-subtitle"></p>
+        </div>
+
+        <button
+          id="close-panel"
+          class="icon-button panel-close"
+          type="button"
+          aria-label="Fechar ficha do cliente"
+          title="Fechar"
+        >
+          <svg viewBox="0 0 24 24" aria-hidden="true">
+            <path d="M7 7l10 10M17 7 7 17"/>
+          </svg>
+        </button>
+      </div>
+
+      <div class="panel-body">
+        <section id="client-preview" class="client-preview" aria-label="Previa do cliente selecionado">
+          <span id="client-avatar" class="client-avatar" aria-hidden="true">--</span>
+          <div class="client-preview-copy">
+            <span id="preview-label" class="preview-label">Ficha do cliente</span>
+            <strong id="preview-title">Cliente</strong>
+            <small id="preview-meta"></small>
+          </div>
+        </section>
+
+        <section
+          id="coordinate-preview"
+          class="coordinate-preview is-hidden"
+          aria-label="Pre-visualizacoes de clientes neste ponto"
+        >
+          <div class="panel-section-title">
+            <span>Pre-visualizacoes</span>
+            <strong id="coordinate-preview-count"></strong>
+          </div>
+          <div id="coordinate-preview-list" class="preview-card-list"></div>
+        </section>
+
+        <div class="panel-section-title">
+          <span>Localizacao</span>
+        </div>
+
+        <div id="precision-card" class="precision-card">
+          <span class="precision-dot" aria-hidden="true"></span>
+          <div>
+            <strong id="precision-title">Localização aproximada</strong>
+            <p id="precision-text"></p>
+          </div>
+        </div>
+
+        <div class="panel-section-title">
+          <span>Dados principais</span>
+        </div>
+
+        <dl class="detail-list">
+          <div class="detail-row" data-field="cnpj">
+            <dt>CNPJ</dt>
+            <dd id="detail-cnpj"></dd>
+          </div>
+
+          <div class="detail-row" data-field="address">
+            <dt>Endereço</dt>
+            <dd id="detail-address"></dd>
+          </div>
+
+          <div class="detail-row" data-field="phone">
+            <dt>Telefone</dt>
+            <dd id="detail-phone"></dd>
+          </div>
+
+          <div class="detail-row" data-field="cnae">
+            <dt>Atividade</dt>
+            <dd id="detail-cnae"></dd>
+          </div>
+
+          <div class="detail-row" data-field="same-coordinate">
+            <dt>Neste ponto</dt>
+            <dd id="detail-same-coordinate"></dd>
+          </div>
+        </dl>
+
+        <div class="panel-actions" aria-label="Acoes do cliente">
+          <a id="call-client" class="secondary-action is-hidden" href="#" rel="nofollow">
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+              <path d="M22 16.92v2a2 2 0 0 1-2.18 2 19.76 19.76 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6A19.76 19.76 0 0 1 2.12 3.2 2 2 0 0 1 4.11 1h2a2 2 0 0 1 2 1.72c.13.96.35 1.9.66 2.8a2 2 0 0 1-.45 2.11L7.46 8.5a16 16 0 0 0 6 6l.87-.87a2 2 0 0 1 2.11-.45c.9.31 1.84.53 2.8.66A2 2 0 0 1 22 16.92Z"></path>
+            </svg>
+            Ligar
+          </a>
+
+          <a id="open-maps-client" class="secondary-action is-hidden" href="#" target="_blank" rel="noopener">
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+              <path d="M12 21s7-5.2 7-11a7 7 0 1 0-14 0c0 5.8 7 11 7 11Z"></path>
+              <circle cx="12" cy="10" r="2.5"></circle>
+            </svg>
+            Abrir Maps
+          </a>
+
+          <button id="copy-client" class="primary-action" type="button">
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+              <rect x="8" y="8" width="10" height="10" rx="2"></rect>
+              <path d="M16 8V6a2 2 0 0 0-2-2H6a2 2 0 0 0-2 2v8a2 2 0 0 0 2 2h2"></path>
+            </svg>
+            Copiar dados
+          </button>
+        </div>
+      </div>
+    </aside>
+
+    <section
+      id="report-panel"
+      class="report-panel"
+      aria-hidden="true"
+      aria-label="Relatorio de concentracao de clientes"
+    >
+      <div class="report-shell" role="dialog" aria-modal="false" aria-labelledby="report-title">
+        <header class="report-header">
+          <div class="report-title-block">
+            <span class="report-eyebrow">Business Intelligence</span>
+            <h2 id="report-title">Relatorio de concentracao</h2>
+            <p id="report-context">Os indicadores acompanham os filtros atuais da base.</p>
+          </div>
+
+          <button
+            id="close-report"
+            class="icon-button report-close"
+            type="button"
+            aria-label="Fechar relatorio"
+            title="Fechar relatorio"
+          >
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+              <path d="M7 7l10 10M17 7 7 17"></path>
+            </svg>
+          </button>
+        </header>
+
+        <div class="report-body">
+          <section class="report-kpis" aria-label="Indicadores principais">
+            <article class="kpi-card">
+              <span>Clientes analisados</span>
+              <strong id="report-total-value">0</strong>
+              <small id="report-total-note">Base atual</small>
+            </article>
+
+            <article class="kpi-card">
+              <span>Com coordenada</span>
+              <strong id="report-coverage-value">0%</strong>
+              <small id="report-coverage-note">0 pontos no mapa</small>
+            </article>
+
+            <article class="kpi-card">
+              <span>Municipios</span>
+              <strong id="report-cities-value">0</strong>
+              <small id="report-cities-note">Com clientes filtrados</small>
+            </article>
+
+            <article class="kpi-card">
+              <span>Estados</span>
+              <strong id="report-states-value">0</strong>
+              <small id="report-states-note">UFs representadas</small>
+            </article>
+
+            <article class="kpi-card kpi-card-wide">
+              <span>Maior concentracao</span>
+              <strong id="report-top-city-value">-</strong>
+              <small id="report-top-city-note">Sem dados suficientes</small>
+            </article>
+
+            <article class="kpi-card kpi-card-wide">
+              <span>Pontos compartilhados</span>
+              <strong id="report-shared-value">0</strong>
+              <small id="report-shared-note">Clientes no mesmo ponto</small>
+            </article>
+          </section>
+
+          <section id="report-empty" class="report-empty is-hidden">
+            Nenhum cliente encontrado para os filtros atuais.
+          </section>
+
+          <section class="report-grid" aria-label="Graficos de concentracao">
+            <article class="report-card report-card-large">
+              <div class="report-card-header">
+                <div>
+                  <span>Ranking territorial</span>
+                  <h3>Municipios por concentracao</h3>
+                </div>
+                <strong id="report-top-caption">Top 8</strong>
+              </div>
+              <div id="chart-top-cities" class="bar-chart"></div>
+            </article>
+
+            <article class="report-card">
+              <div class="report-card-header">
+                <div>
+                  <span>Carteira</span>
+                  <h3>Situacao cadastral</h3>
+                </div>
+              </div>
+              <div id="chart-status" class="status-chart"></div>
+            </article>
+
+            <article class="report-card">
+              <div class="report-card-header">
+                <div>
+                  <span>Distribuicao</span>
+                  <h3>Clientes por UF</h3>
+                </div>
+              </div>
+              <div id="chart-uf" class="bar-chart compact"></div>
+            </article>
+
+            <article class="report-card">
+              <div class="report-card-header">
+                <div>
+                  <span>Precisao visual</span>
+                  <h3>Clientes por ponto</h3>
+                </div>
+              </div>
+              <div id="chart-coordinate-groups" class="column-chart"></div>
+            </article>
+
+            <article class="report-card report-card-large">
+              <div class="report-card-header">
+                <div>
+                  <span>Indice de oportunidade</span>
+                  <h3>Hotspots de clientes</h3>
+                </div>
+              </div>
+              <div id="report-density-list" class="density-list"></div>
+            </article>
+          </section>
+        </div>
+      </div>
+    </section>
+
+    <section id="app-status" class="app-status" aria-live="polite">
+      <div class="status-card">
+        <div id="status-spinner" class="spinner" aria-hidden="true"></div>
+        <div>
+          <strong id="status-title">Conectando ao Supabase</strong>
+          <p id="status-message">Preparando sua base de clientes…</p>
+        </div>
+        <button id="status-action" class="secondary-action is-hidden" type="button">
+          Tentar novamente
+        </button>
+      </div>
+    </section>
+
+    <div id="toast" class="toast" role="status" aria-live="polite"></div>
+  </main>
+
+  <script
+    src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"
+    integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo="
+    crossorigin=""
+  ></script>
+  <script src="https://unpkg.com/leaflet.markercluster@1.5.3/dist/leaflet.markercluster.js"></script>
+  <script src="https://unpkg.com/leaflet.heat@0.2.0/dist/leaflet-heat.js"></script>
+  <script src="https://unpkg.com/maplibre-gl@5/dist/maplibre-gl.js"></script>
+  <script src="https://unpkg.com/@maplibre/maplibre-gl-leaflet/leaflet-maplibre-gl.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <script src="./app.js?v=20260815-logo1"></script>
+</body>
+</html>
