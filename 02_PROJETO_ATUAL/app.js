@@ -39,7 +39,7 @@
     ).trim()
   });
 
-  const APP_VERSION_FALLBACK = "20260902-feira-operacao15";
+  const APP_VERSION_FALLBACK = "20260902-feira-operacao16";
   const APP_VERSION = getCurrentAppVersion();
   const VERSION_CHECK = Object.freeze({
     URL: "./version.json",
@@ -63,7 +63,10 @@
   const MAP_MOTION = Object.freeze({
     BUTTON_ZOOM_STEP: 1,
     WHEEL_PX_PER_ZOOM_LEVEL: 46,
-    WHEEL_DEBOUNCE_TIME: 12
+    WHEEL_DEBOUNCE_TIME: 12,
+    TOUCH_INERTIA_DECELERATION: 3000,
+    TOUCH_INERTIA_MAX_SPEED: 2400,
+    TOUCH_EASE_LINEARITY: 0.23
   });
 
   // Durante o arraste, a borda do mapa vira uma zona de navegacao continua.
@@ -603,9 +606,9 @@
       markerZoomAnimation: !mobileViewport,
       zoomAnimationThreshold: 3,
       inertia: true,
-      inertiaDeceleration: mobileViewport ? 3400 : 2600,
-      inertiaMaxSpeed: mobileViewport ? 2100 : 1700,
-      easeLinearity: mobileViewport ? 0.2 : 0.18,
+      inertiaDeceleration: mobileViewport ? MAP_MOTION.TOUCH_INERTIA_DECELERATION : 2600,
+      inertiaMaxSpeed: mobileViewport ? MAP_MOTION.TOUCH_INERTIA_MAX_SPEED : 1700,
+      easeLinearity: mobileViewport ? MAP_MOTION.TOUCH_EASE_LINEARITY : 0.18,
       worldCopyJump: true,
       preferCanvas: true
     });
@@ -929,10 +932,14 @@
     const mobileViewport = isMobileViewport();
     const tileOptions = {
       noWrap: false,
-      keepBuffer: mobileViewport ? 5 : 3,
-      updateWhenIdle: mobileViewport,
-      updateWhenZooming: !mobileViewport,
-      updateInterval: mobileViewport ? 150 : 80
+      // Carrega o proximo trecho enquanto o mapa se move. Em touch, esperar
+      // o movimento terminar deixava a imagem de satelite aparentar travada.
+      keepBuffer: mobileViewport ? 3 : 2,
+      updateWhenIdle: false,
+      // Durante zoom usamos a imagem atual escalonada e trocamos os tiles ao
+      // final; durante pan, a atualizacao e continua e mais leve.
+      updateWhenZooming: false,
+      updateInterval: mobileViewport ? 70 : 60
     };
 
     const standardRasterTileOptions = {
@@ -971,7 +978,13 @@
       {
         opacity: mobileViewport ? 0.9 : 0.78,
         ...satelliteTileOptions,
-        keepBuffer: mobileViewport ? 4 : 2
+        // Rotulos sao auxiliares. Eles carregam apos a navegacao para deixar
+        // a imagem principal responsiva e somem no zoom de precisao.
+        maxZoom: 15,
+        maxNativeZoom: 15,
+        keepBuffer: mobileViewport ? 1 : 1,
+        updateWhenIdle: true,
+        updateInterval: mobileViewport ? 180 : 140
       }
     );
 
