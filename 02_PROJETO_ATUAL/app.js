@@ -39,7 +39,7 @@
     ).trim()
   });
 
-  const APP_VERSION_FALLBACK = "20260902-feira-operacao17";
+  const APP_VERSION_FALLBACK = "20260902-feira-operacao18";
   const APP_VERSION = getCurrentAppVersion();
   const VERSION_CHECK = Object.freeze({
     URL: "./version.json",
@@ -486,12 +486,6 @@
       "preview-label",
       "preview-title",
       "preview-meta",
-      "client-commercial-card",
-      "client-score-value",
-      "client-score-label",
-      "client-score-title",
-      "client-score-text",
-      "client-signal-list",
       "client-quick-actions",
       "client-maintenance-actions",
       "edit-client",
@@ -510,11 +504,6 @@
       "detail-address",
       "detail-phone",
       "detail-cnae",
-      "detail-same-coordinate",
-      "nearby-clients",
-      "nearby-title",
-      "nearby-count",
-      "nearby-client-list",
       "route-client-bottom",
       "call-client",
       "open-maps-client",
@@ -5700,15 +5689,11 @@
     }
 
     renderClientPreview(client);
-    renderClientCommercialCard(client);
 
     const precision =
       PRECISION_META[client.geocodeStatus] || PRECISION_META.SEM_STATUS;
     dom.precisionTitle.textContent = precision.title;
-    dom.precisionText.textContent =
-      client.visualGroupSize > 1
-        ? `${precision.text} Neste mapa, clientes com a mesma coordenada foram afastados apenas visualmente para facilitar a leitura.`
-        : precision.text;
+    dom.precisionText.textContent = precision.text;
 
     setDetail("cnpj", dom.detailCnpj, client.cnpj);
 
@@ -5727,20 +5712,7 @@
 
     setDetail("cnae", dom.detailCnae, client.cnae);
 
-    const sameCoordinateCount = client.coordinateKey
-      ? state.coordinateCounts.get(client.coordinateKey) || 1
-      : 0;
-
-    setDetail(
-      "same-coordinate",
-      dom.detailSameCoordinate,
-      sameCoordinateCount > 1
-        ? `${formatNumber(sameCoordinateCount)} clientes compartilham esta coordenada aproximada. No zoom máximo, o agrupamento pode ser aberto para selecionar cada registro.`
-        : ""
-    );
-
     renderSameCoordinate(client, { listMode });
-    renderNearbyClients(client, { listMode });
     updateClientActions(client);
     dom.clientMaintenanceActions.classList.toggle(
       "is-hidden",
@@ -5788,220 +5760,10 @@
     const meta = [
       [client.municipio, client.uf].filter(Boolean).join(" - "),
       client.situacao,
-      formatCep(client.cep),
-      client.visualGroupSize > 1
-        ? `${formatNumber(client.visualGroupSize)} no ponto`
-        : ""
+      formatCep(client.cep)
     ].filter(Boolean);
 
     dom.previewMeta.textContent = meta.join(" / ");
-  }
-
-  function renderClientCommercialCard(client) {
-    const profile = getClientCommercialProfile(client);
-
-    dom.clientCommercialCard.className = `client-commercial-card is-${profile.level}`;
-    dom.clientCommercialCard.style.setProperty("--score", `${profile.score * 3.6}deg`);
-    dom.clientScoreValue.textContent = formatNumber(profile.score);
-    dom.clientScoreLabel.textContent = profile.label;
-    dom.clientScoreTitle.textContent = profile.title;
-    dom.clientScoreText.textContent = profile.text;
-
-    dom.clientSignalList.replaceChildren();
-    profile.signals.forEach((signal) => {
-      const chip = document.createElement("span");
-      chip.className = `client-signal is-${signal.tone}`;
-      chip.textContent = signal.label;
-      dom.clientSignalList.appendChild(chip);
-    });
-  }
-
-  function getClientCommercialProfile(client) {
-    const active = normalizeSearchText(client.situacao) === "ativa";
-    const hasPhone = Boolean(buildTelHref(client));
-    const addressParts = [
-      client.logradouro,
-      client.bairro,
-      client.municipio,
-      client.uf
-    ].filter((value) => cleanValue(value));
-    const addressQuality = addressParts.length / 4;
-    const precision = getPrecisionMeta(client.geocodeStatus);
-    const cityContext = getClientCityContext(client);
-    const nearbyCount = getNearbyClients(client, {
-      radiusMeters: 5000,
-      limit: Infinity
-    }).length;
-    const sameCoordinateCount = client.coordinateKey
-      ? state.coordinateCounts.get(client.coordinateKey) || 1
-      : 0;
-    const missingCritical = [
-      !client.cnpj,
-      !hasPhone,
-      !client.logradouro,
-      !client.bairro,
-      !client.cnae,
-      !client.hasValidCoordinates
-    ].filter(Boolean).length;
-
-    let score = 34;
-    score += active ? 18 : -10;
-    score += hasPhone ? 12 : -6;
-    score += client.cnpj ? 7 : -5;
-    score += client.cnae ? 5 : 0;
-    score += Math.round(addressQuality * 14);
-    score += client.hasValidCoordinates ? 8 : -18;
-    score += client.geocodeStatus === "PRECISO_LOGRADOURO" ? 8 : 0;
-    score += client.geocodeStatus === "APROX_SEDE_MUNICIPIO" ? -5 : 0;
-    score += Math.min(10, Math.floor(cityContext.count / 6));
-    score += nearbyCount >= 8 ? 8 : nearbyCount >= 3 ? 5 : nearbyCount > 0 ? 2 : 0;
-    score += sameCoordinateCount > 1 ? 2 : 0;
-    score -= missingCritical * 3;
-    score = clamp(Math.round(score), 0, active ? 100 : 64);
-
-    const level =
-      score >= 76 ? "high" : score >= 56 ? "medium" : score >= 38 ? "review" : "low";
-    const label =
-      level === "high"
-        ? "Alta"
-        : level === "medium"
-          ? "Media"
-          : level === "review"
-            ? "Revisar"
-            : "Baixa";
-    const title =
-      level === "high"
-        ? "Prioridade comercial alta"
-        : level === "medium"
-          ? "Bom alvo para abordagem"
-          : level === "review"
-            ? "Dados pedem revisao"
-            : "Prioridade baixa";
-    const text =
-      level === "high"
-        ? "Registro ativo, com bons sinais de contato/localizacao e presenca relevante no territorio."
-        : level === "medium"
-          ? "Cliente aproveitavel para rota ou prospeccao, com alguns pontos de dados para confirmar."
-          : level === "review"
-            ? "Antes da abordagem, vale revisar contato, endereco ou precisao do ponto."
-            : "Registro com poucos sinais comerciais ou situacao menos favoravel no momento.";
-
-    const dataQuality = Math.round(((6 - missingCritical) / 6) * 100);
-    const signals = [
-      {
-        label: active ? "Ativo" : "Situacao revisar",
-        tone: active ? "success" : "warning"
-      },
-      {
-        label: hasPhone ? "Contato ok" : "Sem telefone",
-        tone: hasPhone ? "success" : "warning"
-      },
-      {
-        label: client.hasValidCoordinates ? precision.title : "Sem coordenada",
-        tone: client.hasValidCoordinates ? "focus" : "warning"
-      },
-      {
-        label: `${formatNumber(cityContext.count)} na cidade`,
-        tone: cityContext.count >= 8 ? "focus" : "muted"
-      },
-      {
-        label: `${formatNumber(nearbyCount)} em 5 km`,
-        tone: nearbyCount ? "focus" : "muted"
-      },
-      {
-        label: `${formatNumber(dataQuality)}% dados`,
-        tone: dataQuality >= 80 ? "success" : dataQuality >= 55 ? "muted" : "warning"
-      }
-    ];
-
-    return { score, level, label, title, text, signals };
-  }
-
-  function getClientCityContext(client) {
-    const city = normalizeLookupText(client.municipio);
-    const uf = cleanValue(client.uf);
-    const clients = state.clients.filter((item) =>
-      normalizeLookupText(item.municipio) === city && (!uf || item.uf === uf)
-    );
-
-    return {
-      count: clients.length,
-      active: clients.filter((item) => normalizeSearchText(item.situacao) === "ativa").length
-    };
-  }
-
-  function getNearbyClients(client, { radiusMeters = 5000, limit = 5 } = {}) {
-    if (!client?.hasValidCoordinates || !state.map) return [];
-
-    const origin = [client.latitude, client.longitude];
-    return state.clients
-      .filter((item) =>
-        item.id !== client.id &&
-        item.hasValidCoordinates &&
-        item.coordinateKey !== client.coordinateKey
-      )
-      .map((item) => ({
-        client: item,
-        distance: state.map.distance(origin, [item.latitude, item.longitude])
-      }))
-      .filter((item) => item.distance <= radiusMeters)
-      .sort((a, b) => {
-        if (a.distance !== b.distance) return a.distance - b.distance;
-        return String(a.client.displayName).localeCompare(String(b.client.displayName), "pt-BR", {
-          sensitivity: "base",
-          numeric: true
-        });
-      })
-      .slice(0, limit);
-  }
-
-  function renderNearbyClients(client, { listMode = false } = {}) {
-    dom.nearbyClientList.replaceChildren();
-
-    if (listMode || !client.hasValidCoordinates) {
-      dom.nearbyClients.classList.add("is-hidden");
-      return;
-    }
-
-    const allNearby = getNearbyClients(client, { radiusMeters: 5000, limit: Infinity });
-    const nearby = allNearby.slice(0, 4);
-    dom.nearbyClients.classList.toggle("is-hidden", !nearby.length);
-    if (!nearby.length) return;
-
-    dom.nearbyTitle.textContent = "Clientes proximos";
-    dom.nearbyCount.textContent = `${formatNumber(allNearby.length)} em ate 5 km`;
-
-    nearby.forEach(({ client: item, distance }) => {
-      const button = document.createElement("button");
-      button.type = "button";
-      button.className = "nearby-client-card";
-      button.setAttribute("aria-label", `Abrir ficha de ${item.displayName}`);
-
-      const copy = document.createElement("span");
-      copy.className = "nearby-client-copy";
-
-      const title = document.createElement("strong");
-      title.textContent = item.displayName;
-
-      const meta = document.createElement("small");
-      meta.textContent = [
-        formatCompactDistance(distance),
-        [item.bairro, item.municipio, item.uf].filter(Boolean).join(" - ")
-      ].filter(Boolean).join(" / ");
-
-      copy.append(title, meta);
-
-      const status = document.createElement("span");
-      status.className =
-        normalizeSearchText(item.situacao) === "ativa"
-          ? "nearby-client-status"
-          : "nearby-client-status is-inactive";
-      status.textContent = item.situacao || "Base";
-
-      button.append(copy, status);
-      button.addEventListener("click", () => openClient(item, { focusMap: true }));
-      dom.nearbyClientList.appendChild(button);
-    });
   }
 
   function buildPointListSubtitle(group, client) {
@@ -6099,12 +5861,14 @@
   }
 
   function renderSameCoordinate(client, { listMode = false } = {}) {
-    renderCoordinatePreview(client, { listMode });
+    if (!listMode) {
+      dom.coordinatePreview.classList.add("is-hidden");
+      dom.coordinatePreview.classList.remove("is-list-mode");
+      dom.coordinatePreviewList.replaceChildren();
+      return;
+    }
 
-    const row = document.querySelector('[data-field="same-coordinate"]');
-    if (!row) return;
-    row.classList.add("is-hidden");
-    dom.detailSameCoordinate.replaceChildren();
+    renderCoordinatePreview(client, { listMode });
   }
 
   function updateClientActions(client) {
