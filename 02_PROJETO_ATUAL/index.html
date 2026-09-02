@@ -13,7 +13,6 @@
 
   <link rel="preconnect" href="https://tile.openstreetmap.org">
   <link rel="preconnect" href="https://tiles.openfreemap.org">
-  <link rel="preconnect" href="https://server.arcgisonline.com">
   <link rel="preconnect" href="https://services.arcgisonline.com">
   <link rel="preconnect" href="https://cdn.jsdelivr.net">
   <link rel="preconnect" href="https://unpkg.com">
@@ -36,7 +35,7 @@
     rel="stylesheet"
     href="https://unpkg.com/maplibre-gl@5/dist/maplibre-gl.css"
   >
-  <link rel="stylesheet" href="./style.css?v=20260815-bi-area1">
+  <link rel="stylesheet" href="./style.css?v=20260902-feira-operacao14">
 </head>
 
 <body>
@@ -47,6 +46,34 @@
       role="application"
       aria-label="Mapa interativo de potenciais clientes"
     ></div>
+
+    <aside id="field-marker-legend" class="field-marker-legend is-hidden" aria-label="Legenda dos registros de campo">
+      <strong>Registros de campo</strong>
+      <span><i class="marker-legend-dot is-new" aria-hidden="true"></i>Novo cadastro</span>
+      <span><i class="marker-legend-dot is-updated" aria-hidden="true"></i>Atualizado em campo</span>
+      <span><i class="marker-legend-dot" aria-hidden="true"></i>Base original</span>
+      <small>Arraste o 📍 para cadastrar. Arraste um ponto para reposicionar.</small>
+    </aside>
+
+    <button id="new-client-pin" class="new-client-pin" type="button" aria-label="Arraste o pino para cadastrar um novo cliente" title="Arraste para cadastrar cliente">
+      <svg class="new-client-pin-icon" viewBox="0 0 64 76" aria-hidden="true" focusable="false">
+        <defs>
+          <linearGradient id="new-client-pin-fill" x1="15" y1="8" x2="52" y2="66" gradientUnits="userSpaceOnUse">
+            <stop stop-color="#43A2FF"></stop>
+            <stop offset="0.5" stop-color="#007AFF"></stop>
+            <stop offset="1" stop-color="#005FC7"></stop>
+          </linearGradient>
+          <filter id="new-client-pin-shadow" x="-35%" y="-20%" width="170%" height="165%">
+            <feDropShadow dx="0" dy="5" stdDeviation="3.2" flood-color="#002C5C" flood-opacity="0.28"></feDropShadow>
+          </filter>
+        </defs>
+        <path filter="url(#new-client-pin-shadow)" fill="url(#new-client-pin-fill)" d="M32 3C16.7 3 8 14.1 8 28.4c0 17.8 19.5 39.3 22.2 42.3a2.45 2.45 0 0 0 3.6 0C36.5 67.7 56 46.2 56 28.4 56 14.1 47.3 3 32 3Z"></path>
+        <circle cx="32" cy="28" r="12.5" fill="rgba(255,255,255,0.96)"></circle>
+        <path d="M32 21.5v13M25.5 28h13" fill="none" stroke="#007AFF" stroke-width="3.4" stroke-linecap="round"></path>
+        <path d="M18.8 14.2C22.2 10.3 26.7 8 32 8" fill="none" stroke="rgba(255,255,255,0.34)" stroke-width="2.2" stroke-linecap="round"></path>
+      </svg>
+      <span class="sr-only">Arraste para cadastrar um novo cliente</span>
+    </button>
 
     <header class="top-area" aria-label="Pesquisa e filtros">
       <section class="glass-toolbar">
@@ -183,6 +210,21 @@
 
         <div class="filter-actions">
           <button
+            id="maintenance-access"
+            class="maintenance-access"
+            type="button"
+            aria-controls="maintenance-panel"
+            aria-expanded="false"
+            title="Acessar manutencao"
+          >
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+              <path d="M12 15.5a3.5 3.5 0 1 0 0-7 3.5 3.5 0 0 0 0 7Z"></path>
+              <path d="M19.4 15a1.7 1.7 0 0 0 .34 1.88l.06.06-2.83 2.83-.06-.06a1.7 1.7 0 0 0-1.88-.34 1.7 1.7 0 0 0-1.03 1.55V21h-4v-.08A1.7 1.7 0 0 0 9 19.37a1.7 1.7 0 0 0-1.88.34l-.06.06-2.83-2.83.06-.06A1.7 1.7 0 0 0 4.63 15 1.7 1.7 0 0 0 3.08 14H3v-4h.08A1.7 1.7 0 0 0 4.63 9a1.7 1.7 0 0 0-.34-1.88l-.06-.06 2.83-2.83.06.06A1.7 1.7 0 0 0 9 4.63 1.7 1.7 0 0 0 10 3.08V3h4v.08A1.7 1.7 0 0 0 15 4.63a1.7 1.7 0 0 0 1.88-.34l.06-.06 2.83 2.83-.06.06A1.7 1.7 0 0 0 19.37 9 1.7 1.7 0 0 0 20.92 10H21v4h-.08A1.7 1.7 0 0 0 19.4 15Z"></path>
+            </svg>
+            <span id="maintenance-label">Manutencao</span>
+          </button>
+
+          <button
             id="open-report"
             class="report-tab-button"
             type="button"
@@ -237,6 +279,180 @@
 
     <div id="modal-backdrop" class="modal-backdrop" aria-hidden="true"></div>
 
+    <section
+      id="maintenance-panel"
+      class="maintenance-panel"
+      aria-hidden="true"
+      aria-label="Manutencao do mapa"
+    >
+      <div class="maintenance-shell" role="dialog" aria-modal="true" aria-labelledby="maintenance-title">
+        <header class="maintenance-header">
+          <div>
+            <span class="maintenance-eyebrow">Acesso restrito</span>
+            <h2 id="maintenance-title">Manutencao</h2>
+            <p id="maintenance-subtitle">Entre com o usuario autorizado no Supabase.</p>
+          </div>
+          <button id="close-maintenance" class="icon-button" type="button" aria-label="Fechar manutencao">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 7l10 10M17 7 7 17"/></svg>
+          </button>
+        </header>
+
+        <div id="maintenance-login-view" class="maintenance-body">
+          <form id="maintenance-login-form" class="maintenance-form">
+            <label class="maintenance-field">
+              <span>E-mail</span>
+              <input id="maintenance-email" type="email" autocomplete="username" required>
+            </label>
+            <label class="maintenance-field">
+              <span>Senha</span>
+              <input id="maintenance-password" type="password" autocomplete="current-password" required minlength="6">
+            </label>
+            <p id="maintenance-login-error" class="maintenance-message is-hidden" role="alert"></p>
+            <button id="maintenance-login-submit" class="primary-action" type="submit">Entrar</button>
+          </form>
+        </div>
+
+        <div id="maintenance-session-view" class="maintenance-body is-hidden">
+          <section class="maintenance-profile">
+            <span id="maintenance-profile-initials" aria-hidden="true">--</span>
+            <div>
+              <strong id="maintenance-profile-name">Operador</strong>
+              <small id="maintenance-profile-role">Perfil</small>
+            </div>
+          </section>
+
+          <div class="maintenance-actions">
+            <button id="maintenance-new-client" class="primary-action" type="button">
+              Marcar novo ponto
+            </button>
+            <button id="maintenance-sign-out" class="secondary-action" type="button">
+              Sair
+            </button>
+          </div>
+
+          <p class="maintenance-flow-note">
+            Arraste o 📍 ate o ponto do novo cliente; depois confira o endereco sugerido e complete os dados.
+          </p>
+
+          <section class="maintenance-activity">
+            <div class="panel-section-title">
+              <span>Atividade recente</span>
+              <strong id="maintenance-activity-count">0</strong>
+            </div>
+            <div id="maintenance-activity-list" class="maintenance-activity-list"></div>
+          </section>
+        </div>
+
+        <div id="maintenance-client-view" class="maintenance-body is-hidden">
+          <form id="maintenance-client-form" class="maintenance-form">
+            <div class="maintenance-form-heading">
+              <button id="maintenance-client-back" class="text-button" type="button">Voltar</button>
+              <div>
+                <strong id="maintenance-client-form-title">Novo cliente</strong>
+                <small id="maintenance-client-form-note">Cadastre somente informacoes confirmadas.</small>
+              </div>
+            </div>
+
+            <div id="maintenance-client-fields" class="maintenance-field-grid">
+              <label class="maintenance-field maintenance-field-wide">
+                <span>Nome do cliente *</span>
+                <input id="maintenance-client-name" type="text" autocomplete="organization" maxlength="180">
+              </label>
+              <label class="maintenance-field maintenance-field-wide">
+                <span>Razao social</span>
+                <input id="maintenance-client-legal-name" type="text" maxlength="220">
+              </label>
+              <label class="maintenance-field">
+                <span>CNPJ</span>
+                <input id="maintenance-client-cnpj" type="text" inputmode="numeric" maxlength="18">
+              </label>
+              <label class="maintenance-field">
+                <span>Contato</span>
+                <input id="maintenance-client-contact" type="text" autocomplete="name" maxlength="160">
+              </label>
+              <label class="maintenance-field">
+                <span>Telefone</span>
+                <input id="maintenance-client-phone" type="tel" autocomplete="tel" maxlength="24">
+              </label>
+              <label class="maintenance-field">
+                <span>WhatsApp</span>
+                <input id="maintenance-client-whatsapp" type="tel" maxlength="24">
+              </label>
+              <label class="maintenance-field maintenance-field-wide">
+                <span>E-mail</span>
+                <input id="maintenance-client-email" type="email" autocomplete="email" maxlength="180">
+              </label>
+              <label class="maintenance-field">
+                <span>UF</span>
+                <input id="maintenance-client-uf" type="text" maxlength="2" autocapitalize="characters">
+              </label>
+              <label class="maintenance-field">
+                <span>Municipio</span>
+                <input id="maintenance-client-city" type="text" maxlength="140">
+              </label>
+              <label class="maintenance-field">
+                <span>Bairro/localidade</span>
+                <input id="maintenance-client-district" type="text" maxlength="160">
+              </label>
+              <label class="maintenance-field">
+                <span>CEP</span>
+                <input id="maintenance-client-cep" type="text" inputmode="numeric" maxlength="10">
+              </label>
+              <label class="maintenance-field maintenance-field-wide">
+                <span>Logradouro</span>
+                <input id="maintenance-client-street" type="text" maxlength="220">
+              </label>
+              <label class="maintenance-field maintenance-field-wide">
+                <span>Observacoes comerciais</span>
+                <textarea id="maintenance-client-notes" rows="3" maxlength="1200"></textarea>
+              </label>
+            </div>
+
+            <section id="maintenance-location-card" class="maintenance-location-card">
+              <div>
+                <strong id="maintenance-location-title">Ponto obrigatorio</strong>
+                <small id="maintenance-location-coordinates">Nenhum ponto selecionado</small>
+                <small id="maintenance-location-address" class="maintenance-location-address" aria-live="polite">Marque o ponto para sugerir o endereco.</small>
+                <a id="maintenance-location-attribution" class="maintenance-location-attribution is-hidden" href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">Dados © OpenStreetMap contributors · Nominatim</a>
+                <small id="maintenance-location-privacy" class="maintenance-location-privacy is-hidden">Ao confirmar, enviamos somente a coordenada ao OpenStreetMap para sugerir o endereco.</small>
+              </div>
+              <div class="maintenance-location-actions">
+                <button id="maintenance-refresh-address" class="text-button is-hidden" type="button">Consultar endereco</button>
+                <button id="maintenance-pick-location" class="secondary-action" type="button">Marcar no mapa</button>
+              </div>
+            </section>
+
+            <p id="maintenance-client-error" class="maintenance-message is-hidden" role="alert"></p>
+            <button id="maintenance-client-submit" class="primary-action" type="submit">Salvar cliente</button>
+          </form>
+        </div>
+      </div>
+    </section>
+
+    <div id="location-picker-bar" class="location-picker-bar is-hidden" role="status">
+      <div>
+        <strong>Selecione o ponto exato</strong>
+        <small>Toque ou clique no mapa; se estiver no local, use a posicao do aparelho.</small>
+      </div>
+      <div class="location-picker-actions">
+        <button id="use-device-location" class="secondary-action" type="button">Minha posicao</button>
+        <button id="cancel-location-picker" class="secondary-action" type="button">Cancelar</button>
+      </div>
+    </div>
+
+    <section id="relocation-confirmation" class="relocation-confirmation is-hidden" role="dialog" aria-modal="true" aria-labelledby="relocation-title">
+      <div>
+        <strong id="relocation-title">Reposicionar localizacao?</strong>
+        <p id="relocation-client-name">Cliente</p>
+        <small id="relocation-coordinates"></small>
+        <small id="relocation-location-summary" class="relocation-location-summary" aria-live="polite"></small>
+      </div>
+      <div class="relocation-confirmation-actions">
+        <button id="relocation-cancel" class="secondary-action" type="button">Nao, voltar</button>
+        <button id="relocation-confirm" class="primary-action" type="button">Sim, reposicionar</button>
+      </div>
+    </section>
+
     <aside
       id="client-panel"
       class="client-panel"
@@ -280,6 +496,46 @@
             <strong id="preview-title">Cliente</strong>
             <small id="preview-meta"></small>
           </div>
+        </section>
+
+        <section id="client-commercial-card" class="client-commercial-card" aria-label="Prioridade comercial">
+          <div class="client-score">
+            <strong id="client-score-value">0</strong>
+            <small id="client-score-label">Prioridade</small>
+          </div>
+          <div class="client-commercial-copy">
+            <strong id="client-score-title">Analise comercial</strong>
+            <p id="client-score-text"></p>
+            <div id="client-signal-list" class="client-signal-list"></div>
+          </div>
+        </section>
+
+        <section id="client-quick-actions" class="client-quick-actions" aria-label="Acoes rapidas da ficha">
+          <a id="route-client" class="quick-action is-hidden" href="#" target="_blank" rel="noopener">
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+              <path d="M4 17 13 4l7 16-7-3-4 3 1-5-6 2Z"></path>
+            </svg>
+            Rota
+          </a>
+          <button id="copy-address-client" class="quick-action" type="button">
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+              <path d="M12 21s7-5.2 7-11a7 7 0 1 0-14 0c0 5.8 7 11 7 11Z"></path>
+              <circle cx="12" cy="10" r="2.5"></circle>
+            </svg>
+            Endereco
+          </button>
+          <button id="copy-maps-client" class="quick-action" type="button">
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+              <path d="M10 13a5 5 0 0 0 7.07 0l2-2a5 5 0 0 0-7.07-7.07l-1.15 1.15"></path>
+              <path d="M14 11a5 5 0 0 0-7.07 0l-2 2A5 5 0 0 0 12 20.07l1.15-1.15"></path>
+            </svg>
+            Link Maps
+          </button>
+        </section>
+
+        <section id="client-maintenance-actions" class="client-maintenance-actions is-hidden" aria-label="Manutencao do cliente">
+          <button id="edit-client" type="button">Editar contato</button>
+          <button id="relocate-client" type="button">Ajustar ponto</button>
         </section>
 
         <section
@@ -337,7 +593,22 @@
           </div>
         </dl>
 
+        <section id="nearby-clients" class="nearby-clients" aria-label="Clientes proximos">
+          <div class="panel-section-title">
+            <span id="nearby-title">Clientes proximos</span>
+            <strong id="nearby-count"></strong>
+          </div>
+          <div id="nearby-client-list" class="nearby-client-list"></div>
+        </section>
+
         <div class="panel-actions" aria-label="Acoes do cliente">
+          <a id="route-client-bottom" class="secondary-action is-hidden" href="#" target="_blank" rel="noopener" title="Abrir rota">
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+              <path d="M4 17 13 4l7 16-7-3-4 3 1-5-6 2Z"></path>
+            </svg>
+            Rota
+          </a>
+
           <a id="call-client" class="secondary-action is-hidden" href="#" rel="nofollow">
             <svg viewBox="0 0 24 24" aria-hidden="true">
               <path d="M22 16.92v2a2 2 0 0 1-2.18 2 19.76 19.76 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6A19.76 19.76 0 0 1 2.12 3.2 2 2 0 0 1 4.11 1h2a2 2 0 0 1 2 1.72c.13.96.35 1.9.66 2.8a2 2 0 0 1-.45 2.11L7.46 8.5a16 16 0 0 0 6 6l.87-.87a2 2 0 0 1 2.11-.45c.9.31 1.84.53 2.8.66A2 2 0 0 1 22 16.92Z"></path>
@@ -660,6 +931,7 @@
   <script src="https://unpkg.com/maplibre-gl@5/dist/maplibre-gl.js"></script>
   <script src="https://unpkg.com/@maplibre/maplibre-gl-leaflet/leaflet-maplibre-gl.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
-  <script src="./app.js?v=20260815-bi-area1"></script>
+  <script src="./config.js?v=20260902-feira-operacao14"></script>
+  <script src="./app.js?v=20260902-feira-operacao14"></script>
 </body>
 </html>

@@ -12,15 +12,34 @@
    *    automaticamente pelo campo "ref" da chave.
    * 4) Para chaves "sb_publishable_...", informe também SUPABASE_URL.
    */
+  const RUNTIME_CONFIG = window.MAPA_CLIENTES_CONFIG || {};
   const CONFIG = Object.freeze({
-    SUPABASE_URL: "",
-    SUPABASE_ANON_KEY: "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InB3bWdiYXh5d3Z5eWZtbGt5Z3FyIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzczNDI3NDAsImV4cCI6MjA5MjkxODc0MH0.kSYonDj0VBHjMZuVlGeVQjAuMmbEBMQfB4OsBcZOecg",
-    SCHEMA_NAME: "mapa_clientes",
-    TABLE_NAME: "base_mapa",
-    PAGE_SIZE: 1000
+    PROFILE: String(RUNTIME_CONFIG.PROFILE || "production").trim(),
+    SUPABASE_URL: String(RUNTIME_CONFIG.SUPABASE_URL || "").trim(),
+    SUPABASE_ANON_KEY: String(
+      RUNTIME_CONFIG.SUPABASE_PUBLISHABLE_KEY ||
+      RUNTIME_CONFIG.SUPABASE_ANON_KEY ||
+      ""
+    ).trim(),
+    SCHEMA_NAME: String(
+      RUNTIME_CONFIG.SUPABASE_SCHEMA || "mapa_clientes"
+    ).trim(),
+    TABLE_NAME: String(
+      RUNTIME_CONFIG.SUPABASE_TABLE || "vw_clientes_app"
+    ).trim(),
+    PAGE_SIZE: Number(RUNTIME_CONFIG.SUPABASE_PAGE_SIZE) || 1000,
+    REVERSE_GEOCODING_FUNCTION: String(
+      RUNTIME_CONFIG.REVERSE_GEOCODING_FUNCTION || ""
+    ).trim(),
+    GOOGLE_MAPS_BROWSER_KEY: String(
+      RUNTIME_CONFIG.GOOGLE_MAPS_BROWSER_KEY || ""
+    ).trim(),
+    GOOGLE_MAPS_MAP_ID: String(
+      RUNTIME_CONFIG.GOOGLE_MAPS_MAP_ID || ""
+    ).trim()
   });
 
-  const APP_VERSION_FALLBACK = "20260815-bi-area1";
+  const APP_VERSION_FALLBACK = "20260902-feira-operacao14";
   const APP_VERSION = getCurrentAppVersion();
   const VERSION_CHECK = Object.freeze({
     URL: "./version.json",
@@ -45,6 +64,12 @@
     BUTTON_ZOOM_STEP: 1,
     WHEEL_PX_PER_ZOOM_LEVEL: 46,
     WHEEL_DEBOUNCE_TIME: 12
+  });
+
+  const NEW_CLIENT_PIN = Object.freeze({
+    TIP_X_RATIO: 0.5,
+    TIP_Y_RATIO: 0.93,
+    MOVE_TOLERANCE_PX: 10
   });
 
   const POINT_NAVIGATION = Object.freeze({
@@ -92,6 +117,16 @@
     OSM: "osm",
     VECTOR: "vector",
     SATELLITE: "satellite"
+  });
+
+  // O Esri pode nao ter cache em todos os niveis de zoom. Em telas HiDPI,
+  // o detectRetina do Leaflet pede um nivel adicional e expunha o tile cinza
+  // "Map data not yet available". Mantemos a navegacao ate z18, escalando
+  // com qualidade o ultimo nivel seguro da imagem.
+  const SATELLITE_RENDERING = Object.freeze({
+    MAX_NATIVE_ZOOM: 17,
+    FALLBACK_DELAY_MS: 1300,
+    MIN_ERRORS_FOR_FALLBACK: 3
   });
 
   const BRAZIL_STATE_ALIASES = Object.freeze({
@@ -218,6 +253,10 @@
     '<a href="https://www.esri.com/" target="_blank" rel="noopener">Esri</a> World Imagery, DigitalGlobe, GeoEye, USDA FSA, USGS, AEX, Getmapping, Aerogrid, IGN, IGP, swisstopo, and the GIS User Community';
 
   const PRECISION_META = Object.freeze({
+    CONFIRMADA_CAMPO: {
+      title: "Localização confirmada",
+      text: "Ponto revisado e confirmado manualmente pela equipe de campo."
+    },
     PRECISO_LOGRADOURO: {
       title: "Localização por logradouro",
       text: "Coordenada refinada a partir das informações de endereço disponíveis."
@@ -249,6 +288,12 @@
     heatLayer: null,
     territoryLayer: null,
     areaLayer: null,
+    pinPreviewLayer: null,
+    pinPreviewRing: null,
+    pinPreviewMarker: null,
+    relocationPreviewLayer: null,
+    relocationPreviewMarker: null,
+    relocationPreviewSourceMarker: null,
     heatPoints: [],
     selectedLayer: null,
     baseLayers: {},
@@ -266,6 +311,20 @@
     baseMode: BASE_LAYER.OSM,
     reportOpen: false,
     reportTab: "overview",
+    maintenanceOpen: false,
+    session: null,
+    operator: null,
+    authSubscription: null,
+    maintenanceActivity: [],
+    maintenanceView: "home",
+    clientFormMode: "new",
+    editingClientId: "",
+    locationDraft: null,
+    addressAutofill: {},
+    locationPickerActive: false,
+    googleGeocoderPromise: null,
+    newClientPinDrag: null,
+    pendingRelocation: null,
     areaSelection: null,
     filters: {
       uf: "",
@@ -287,6 +346,10 @@
     heatAnimationClassTimer: null,
     satelliteNoticeShown: false,
     satelliteErrorShown: false,
+    satelliteHealthCycle: 0,
+    satelliteLoadedTiles: 0,
+    satelliteFailedTiles: 0,
+    satelliteFallbackTimer: null,
     loading: false
   };
 
@@ -311,6 +374,8 @@
     const ids = [
       "app",
       "map",
+      "field-marker-legend",
+      "new-client-pin",
       "search-input",
       "clear-search",
       "search-results",
@@ -318,6 +383,8 @@
       "filter-municipio",
       "filter-situacao",
       "reset-filters",
+      "maintenance-access",
+      "maintenance-label",
       "open-report",
       "result-count",
       "result-pill",
@@ -335,6 +402,62 @@
       "region-title",
       "region-subtitle",
       "modal-backdrop",
+      "maintenance-panel",
+      "close-maintenance",
+      "maintenance-title",
+      "maintenance-subtitle",
+      "maintenance-login-view",
+      "maintenance-login-form",
+      "maintenance-email",
+      "maintenance-password",
+      "maintenance-login-error",
+      "maintenance-login-submit",
+      "maintenance-session-view",
+      "maintenance-profile-initials",
+      "maintenance-profile-name",
+      "maintenance-profile-role",
+      "maintenance-new-client",
+      "maintenance-sign-out",
+      "maintenance-activity-count",
+      "maintenance-activity-list",
+      "maintenance-client-view",
+      "maintenance-client-form",
+      "maintenance-client-back",
+      "maintenance-client-form-title",
+      "maintenance-client-form-note",
+      "maintenance-client-fields",
+      "maintenance-client-name",
+      "maintenance-client-legal-name",
+      "maintenance-client-cnpj",
+      "maintenance-client-contact",
+      "maintenance-client-phone",
+      "maintenance-client-whatsapp",
+      "maintenance-client-email",
+      "maintenance-client-uf",
+      "maintenance-client-city",
+      "maintenance-client-district",
+      "maintenance-client-cep",
+      "maintenance-client-street",
+      "maintenance-client-notes",
+      "maintenance-location-card",
+      "maintenance-location-title",
+      "maintenance-location-coordinates",
+      "maintenance-location-address",
+      "maintenance-location-attribution",
+      "maintenance-location-privacy",
+      "maintenance-refresh-address",
+      "maintenance-pick-location",
+      "maintenance-client-error",
+      "maintenance-client-submit",
+      "location-picker-bar",
+      "use-device-location",
+      "cancel-location-picker",
+      "relocation-confirmation",
+      "relocation-client-name",
+      "relocation-coordinates",
+      "relocation-location-summary",
+      "relocation-cancel",
+      "relocation-confirm",
       "client-panel",
       "sheet-handle",
       "close-panel",
@@ -346,6 +469,19 @@
       "preview-label",
       "preview-title",
       "preview-meta",
+      "client-commercial-card",
+      "client-score-value",
+      "client-score-label",
+      "client-score-title",
+      "client-score-text",
+      "client-signal-list",
+      "client-quick-actions",
+      "client-maintenance-actions",
+      "edit-client",
+      "relocate-client",
+      "route-client",
+      "copy-address-client",
+      "copy-maps-client",
       "coordinate-preview",
       "coordinate-preview-title",
       "coordinate-preview-count",
@@ -358,6 +494,11 @@
       "detail-phone",
       "detail-cnae",
       "detail-same-coordinate",
+      "nearby-clients",
+      "nearby-title",
+      "nearby-count",
+      "nearby-client-list",
+      "route-client-bottom",
       "call-client",
       "open-maps-client",
       "copy-client",
@@ -529,6 +670,8 @@
     }
 
     state.selectedLayer = L.layerGroup().addTo(state.map);
+    state.pinPreviewLayer = L.layerGroup().addTo(state.map);
+    state.relocationPreviewLayer = L.layerGroup().addTo(state.map);
     state.territoryLayer = L.geoJSON(null, {
       interactive: false,
       style: getTerritoryStyle
@@ -536,6 +679,7 @@
     state.areaLayer = L.layerGroup().addTo(state.map);
 
     state.map.on("click", (event) => {
+      if (handleLocationPickerClick(event)) return;
       setRegionTarget(event.latlng, getClickRegionSource());
       hideSearchResults();
       updateRegionReadout();
@@ -549,6 +693,134 @@
     applyViewMode({ persist: false });
   }
 
+  function bindNewClientPin() {
+    const pin = dom.newClientPin;
+    if (!pin) return;
+
+    pin.addEventListener("pointerdown", (event) => {
+      if (event.button > 0 || state.locationPickerActive || state.pendingRelocation) {
+        return;
+      }
+
+      if (!canManageClients()) {
+        openMaintenancePanel();
+        showToast("Entre com um operador para cadastrar pelo pino.");
+        return;
+      }
+
+      event.preventDefault();
+      event.stopPropagation();
+      const pinBounds = pin.getBoundingClientRect();
+      state.newClientPinDrag = {
+        pointerId: event.pointerId,
+        startX: event.clientX,
+        startY: event.clientY,
+        tipX: pinBounds.left + pinBounds.width * NEW_CLIENT_PIN.TIP_X_RATIO,
+        tipY: pinBounds.top + pinBounds.height * NEW_CLIENT_PIN.TIP_Y_RATIO,
+        moved: false
+      };
+      pin.classList.add("is-dragging");
+      dom.app.classList.add("is-placing-new-client");
+      pin.setPointerCapture?.(event.pointerId);
+    });
+
+    pin.addEventListener("pointermove", (event) => {
+      const drag = state.newClientPinDrag;
+      if (!drag || event.pointerId !== drag.pointerId) return;
+
+      const offsetX = event.clientX - drag.tipX;
+      const offsetY = event.clientY - drag.tipY;
+      drag.moved = drag.moved || Math.hypot(
+        event.clientX - drag.startX,
+        event.clientY - drag.startY
+      ) > NEW_CLIENT_PIN.MOVE_TOLERANCE_PX;
+      pin.style.setProperty("--pin-drag-x", `${offsetX}px`);
+      pin.style.setProperty("--pin-drag-y", `${offsetY}px`);
+
+      const latlng = getMapLatLngFromPointer(event.clientX, event.clientY);
+      if (latlng && isPointInBrazil(latlng.lat, latlng.lng)) {
+        renderNewClientPinPreview(latlng);
+      } else {
+        clearNewClientPinPreview();
+      }
+    });
+
+    const finishPinDrag = (event, cancelled = false) => {
+      const drag = state.newClientPinDrag;
+      if (!drag || event.pointerId !== drag.pointerId) return;
+
+      state.newClientPinDrag = null;
+      pin.classList.remove("is-dragging");
+      dom.app.classList.remove("is-placing-new-client");
+      pin.style.removeProperty("--pin-drag-x");
+      pin.style.removeProperty("--pin-drag-y");
+      clearNewClientPinPreview();
+      if (pin.hasPointerCapture?.(event.pointerId)) {
+        pin.releasePointerCapture(event.pointerId);
+      }
+
+      if (cancelled || !drag.moved) {
+        if (!cancelled) showToast("Arraste o 📍 ate o local exato do novo cliente.");
+        return;
+      }
+
+      const latlng = getMapLatLngFromPointer(event.clientX, event.clientY);
+      if (!latlng || !isPointInBrazil(latlng.lat, latlng.lng)) {
+        showToast("Solte o 📍 dentro do mapa do Brasil.");
+        return;
+      }
+
+      beginNewClientFlowAtPoint(latlng, "ATALHO_PIN_ARRASTADO");
+    };
+
+    pin.addEventListener("pointerup", (event) => finishPinDrag(event));
+    pin.addEventListener("pointercancel", (event) => finishPinDrag(event, true));
+  }
+
+  function getMapLatLngFromPointer(clientX, clientY) {
+    const container = state.map?.getContainer();
+    if (!container || !state.map) return null;
+
+    const bounds = container.getBoundingClientRect();
+    return state.map.containerPointToLatLng([
+      clientX - bounds.left,
+      clientY - bounds.top
+    ]);
+  }
+
+  function renderNewClientPinPreview(latlng) {
+    if (!state.pinPreviewLayer || !window.L) return;
+
+    if (!state.pinPreviewRing) {
+      state.pinPreviewRing = L.circleMarker(latlng, {
+        radius: 15,
+        weight: 2,
+        color: "rgba(255, 255, 255, 0.96)",
+        fillColor: "rgba(0, 122, 255, 0.16)",
+        fillOpacity: 0.9,
+        interactive: false
+      }).addTo(state.pinPreviewLayer);
+      state.pinPreviewMarker = L.circleMarker(latlng, {
+        radius: 5.5,
+        weight: 2.5,
+        color: "#ffffff",
+        fillColor: "#007aff",
+        fillOpacity: 1,
+        interactive: false
+      }).addTo(state.pinPreviewLayer);
+      return;
+    }
+
+    state.pinPreviewRing.setLatLng(latlng);
+    state.pinPreviewMarker?.setLatLng(latlng);
+  }
+
+  function clearNewClientPinPreview() {
+    state.pinPreviewLayer?.clearLayers();
+    state.pinPreviewRing = null;
+    state.pinPreviewMarker = null;
+  }
+
   function initBaseLayers() {
     const mobileViewport = isMobileViewport();
     const tileOptions = {
@@ -556,7 +828,11 @@
       keepBuffer: mobileViewport ? 5 : 3,
       updateWhenIdle: mobileViewport,
       updateWhenZooming: !mobileViewport,
-      updateInterval: mobileViewport ? 150 : 80,
+      updateInterval: mobileViewport ? 150 : 80
+    };
+
+    const standardRasterTileOptions = {
+      ...tileOptions,
       detectRetina: true
     };
 
@@ -566,27 +842,31 @@
           '&copy; <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">OpenStreetMap</a> contributors',
         maxZoom: 19,
         maxNativeZoom: 19,
-        ...tileOptions
+        ...standardRasterTileOptions
       }),
     };
 
+    const satelliteTileOptions = {
+      ...tileOptions,
+      // Nao solicitar o z+1 em televisores e monitores de alta densidade.
+      detectRetina: false,
+      maxZoom: 18,
+      maxNativeZoom: SATELLITE_RENDERING.MAX_NATIVE_ZOOM
+    };
+
     const satelliteImagery = L.tileLayer(
-      "https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}",
+      "https://services.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}",
       {
         attribution: SATELLITE_ATTRIBUTION,
-        maxZoom: 19,
-        maxNativeZoom: 19,
-        ...tileOptions
+        ...satelliteTileOptions
       }
     );
 
     const satelliteLabels = L.tileLayer(
       "https://services.arcgisonline.com/ArcGIS/rest/services/Reference/World_Boundaries_and_Places/MapServer/tile/{z}/{y}/{x}",
       {
-        maxZoom: 19,
-        maxNativeZoom: 19,
         opacity: mobileViewport ? 0.9 : 0.78,
-        ...tileOptions,
+        ...satelliteTileOptions,
         keepBuffer: mobileViewport ? 4 : 2
       }
     );
@@ -596,11 +876,8 @@
       satelliteLabels
     ]);
 
-    satelliteImagery.on("tileerror", () => {
-      if (state.baseMode !== BASE_LAYER.SATELLITE || state.satelliteErrorShown) return;
-      state.satelliteErrorShown = true;
-      showToast("Satelite nao carregou agora. Use OSM ou Vetor e tente novamente depois.");
-    });
+    satelliteImagery.on("tileload", noteSatelliteTileLoaded);
+    satelliteImagery.on("tileerror", handleSatelliteTileError);
 
     if (typeof L.maplibreGL === "function" && window.maplibregl) {
       state.baseLayers[BASE_LAYER.VECTOR] = L.maplibreGL({
@@ -616,7 +893,58 @@
     syncBaseButtons();
   }
 
+  function resetSatelliteHealth() {
+    window.clearTimeout(state.satelliteFallbackTimer);
+    state.satelliteFallbackTimer = null;
+    state.satelliteHealthCycle += 1;
+    state.satelliteLoadedTiles = 0;
+    state.satelliteFailedTiles = 0;
+    state.satelliteErrorShown = false;
+  }
+
+  function stopSatelliteHealth() {
+    window.clearTimeout(state.satelliteFallbackTimer);
+    state.satelliteFallbackTimer = null;
+  }
+
+  function noteSatelliteTileLoaded() {
+    if (state.baseMode !== BASE_LAYER.SATELLITE) return;
+    state.satelliteLoadedTiles += 1;
+  }
+
+  function handleSatelliteTileError() {
+    if (state.baseMode !== BASE_LAYER.SATELLITE) return;
+
+    state.satelliteFailedTiles += 1;
+    if (
+      state.satelliteFallbackTimer ||
+      state.satelliteFailedTiles < SATELLITE_RENDERING.MIN_ERRORS_FOR_FALLBACK
+    ) {
+      return;
+    }
+
+    const healthCycle = state.satelliteHealthCycle;
+    state.satelliteFallbackTimer = window.setTimeout(() => {
+      state.satelliteFallbackTimer = null;
+      const shouldFallback =
+        state.baseMode === BASE_LAYER.SATELLITE &&
+        state.satelliteHealthCycle === healthCycle &&
+        state.satelliteFailedTiles >= SATELLITE_RENDERING.MIN_ERRORS_FOR_FALLBACK &&
+        state.satelliteFailedTiles > state.satelliteLoadedTiles;
+
+      if (!shouldFallback) return;
+
+      state.satelliteErrorShown = true;
+      const fallbackMode = state.baseLayers[BASE_LAYER.VECTOR]
+        ? BASE_LAYER.VECTOR
+        : BASE_LAYER.OSM;
+      setBaseLayer(fallbackMode, { persist: true, notify: false });
+      showToast("Imagem de satelite indisponivel. Voltamos para uma camada estavel.");
+    }, SATELLITE_RENDERING.FALLBACK_DELAY_MS);
+  }
+
   function bindEvents() {
+    bindNewClientPin();
     dom.searchInput.addEventListener("input", handleSearchInput);
     dom.searchInput.addEventListener("focus", () => {
       if (state.searchQuery) renderSearchResults();
@@ -658,6 +986,21 @@
     });
 
     dom.resetFilters.addEventListener("click", resetFilters);
+    dom.maintenanceAccess.addEventListener("click", openMaintenancePanel);
+    dom.closeMaintenance.addEventListener("click", closeMaintenancePanel);
+    dom.maintenanceLoginForm.addEventListener("submit", handleMaintenanceLogin);
+    dom.maintenanceSignOut.addEventListener("click", handleMaintenanceSignOut);
+    dom.maintenanceNewClient.addEventListener("click", beginNewClientFlow);
+    dom.maintenanceClientBack.addEventListener("click", showMaintenanceHome);
+    dom.maintenanceClientForm.addEventListener("submit", handleClientFormSubmit);
+    dom.maintenancePickLocation.addEventListener("click", startLocationPicker);
+    dom.maintenanceRefreshAddress.addEventListener("click", retryLocationAddress);
+    dom.useDeviceLocation.addEventListener("click", useDeviceLocation);
+    dom.cancelLocationPicker.addEventListener("click", cancelLocationPicker);
+    dom.relocationCancel.addEventListener("click", cancelPendingRelocation);
+    dom.relocationConfirm.addEventListener("click", confirmPendingRelocation);
+    dom.editClient.addEventListener("click", () => openClientForm("edit", state.selectedClient));
+    dom.relocateClient.addEventListener("click", () => openClientForm("location", state.selectedClient));
 
     dom.viewMarkers.addEventListener("click", () => setViewMode("markers"));
     dom.viewHeat.addEventListener("click", () => setViewMode("heat"));
@@ -672,6 +1015,8 @@
     dom.closePanel.addEventListener("click", closeClientPanel);
     dom.sheetHandle.addEventListener("click", toggleMobileSheet);
     dom.copyClient.addEventListener("click", copySelectedClient);
+    dom.copyAddressClient.addEventListener("click", copySelectedClientAddress);
+    dom.copyMapsClient.addEventListener("click", copySelectedClientMaps);
     dom.openReport.addEventListener("click", openReportPanel);
     dom.closeReport.addEventListener("click", closeReportPanel);
     dom.reportSelectVisibleArea.addEventListener("click", selectVisibleMapArea);
@@ -694,6 +1039,10 @@
 
     document.addEventListener("keydown", (event) => {
       if (event.key === "Escape") {
+        if (state.locationPickerActive) {
+          cancelLocationPicker();
+          return;
+        }
         state.map?.closePopup();
         closeTopModal();
       }
@@ -750,6 +1099,16 @@
   }
 
   function closeTopModal() {
+    if (state.pendingRelocation) {
+      cancelPendingRelocation();
+      return;
+    }
+
+    if (state.maintenanceOpen) {
+      closeMaintenancePanel();
+      return;
+    }
+
     if (state.reportOpen) {
       closeReportPanel();
       return;
@@ -762,10 +1121,1085 @@
 
   function syncModalBackdrop() {
     const hasActiveModal =
-      state.reportOpen || dom.clientPanel.classList.contains("is-open");
+      state.maintenanceOpen ||
+      state.reportOpen ||
+      dom.clientPanel.classList.contains("is-open");
 
     dom.app.classList.toggle("has-mobile-modal", hasActiveModal);
     dom.modalBackdrop.classList.toggle("is-visible", hasActiveModal);
+  }
+
+  function openMaintenancePanel(options = {}) {
+    const preserveView = options?.preserve === true;
+    if (!preserveView) {
+      state.maintenanceView = state.operator ? "home" : "login";
+    }
+    state.maintenanceOpen = true;
+    dom.maintenancePanel.classList.add("is-open");
+    dom.maintenancePanel.setAttribute("aria-hidden", "false");
+    dom.maintenanceAccess.setAttribute("aria-expanded", "true");
+    renderMaintenanceSession();
+    syncModalBackdrop();
+
+    window.setTimeout(() => {
+      if (state.operator && state.maintenanceView === "client") {
+        const focusTarget =
+          state.clientFormMode === "location"
+            ? dom.maintenancePickLocation
+            : dom.maintenanceClientName;
+        focusTarget.focus();
+      } else if (state.operator) {
+        dom.maintenanceNewClient.focus();
+      } else {
+        dom.maintenanceEmail.focus();
+      }
+    }, 80);
+  }
+
+  function closeMaintenancePanel() {
+    state.maintenanceOpen = false;
+    dom.maintenancePanel.classList.remove("is-open");
+    dom.maintenancePanel.setAttribute("aria-hidden", "true");
+    dom.maintenanceAccess.setAttribute("aria-expanded", "false");
+    setMaintenanceError("");
+    syncModalBackdrop();
+  }
+
+  async function handleMaintenanceLogin(event) {
+    event.preventDefault();
+    if (!state.supabaseClient) {
+      setMaintenanceError("A conexao com o Supabase ainda nao esta pronta.");
+      return;
+    }
+
+    const email = cleanValue(dom.maintenanceEmail.value).toLowerCase();
+    const password = String(dom.maintenancePassword.value || "");
+    if (!email || !password) {
+      setMaintenanceError("Informe e-mail e senha.");
+      return;
+    }
+
+    setMaintenanceBusy(true);
+    setMaintenanceError("");
+
+    try {
+      const { data, error } = await state.supabaseClient.auth.signInWithPassword({
+        email,
+        password
+      });
+      if (error) throw error;
+
+      await syncAuthSession(data.session);
+      if (!state.operator) {
+        await state.supabaseClient.auth.signOut();
+        throw new Error("Usuario autenticado, mas sem perfil ativo de operador.");
+      }
+
+      dom.maintenancePassword.value = "";
+      showToast(`Sessao iniciada como ${state.operator.nome}.`);
+    } catch (error) {
+      console.error("[Mapa de clientes] Falha no login:", error);
+      setMaintenanceError(friendlyAuthError(error));
+    } finally {
+      setMaintenanceBusy(false);
+    }
+  }
+
+  async function handleMaintenanceSignOut() {
+    if (!state.supabaseClient) return;
+
+    setMaintenanceBusy(true);
+    try {
+      const { error } = await state.supabaseClient.auth.signOut();
+      if (error) throw error;
+      state.session = null;
+      state.operator = null;
+      state.maintenanceActivity = [];
+      renderMaintenanceSession();
+      showToast("Sessao de manutencao encerrada.");
+    } catch (error) {
+      setMaintenanceError(friendlyAuthError(error));
+    } finally {
+      setMaintenanceBusy(false);
+    }
+  }
+
+  function startAuthListener() {
+    if (!state.supabaseClient || state.authSubscription) return;
+
+    const { data } = state.supabaseClient.auth.onAuthStateChange((_event, session) => {
+      window.setTimeout(() => {
+        syncAuthSession(session).catch((error) => {
+          console.warn("[Mapa de clientes] Falha ao atualizar sessao:", error);
+        });
+      }, 0);
+    });
+    state.authSubscription = data?.subscription || null;
+  }
+
+  async function syncAuthSession(providedSession) {
+    if (!state.supabaseClient) return;
+
+    let session = providedSession;
+    if (session === undefined) {
+      const { data, error } = await state.supabaseClient.auth.getSession();
+      if (error) throw error;
+      session = data?.session || null;
+    }
+
+    state.session = session || null;
+    state.operator = null;
+    state.maintenanceActivity = [];
+
+    if (state.session?.user?.id) {
+      const { data, error } = await state.supabaseClient
+        .schema(CONFIG.SCHEMA_NAME)
+        .from("operadores")
+        .select("usuario_id, nome, papel, ativo")
+        .eq("usuario_id", state.session.user.id)
+        .eq("ativo", true)
+        .maybeSingle();
+
+      if (error) {
+        console.error("[Mapa de clientes] Falha ao validar operador:", error);
+      } else if (data) {
+        state.operator = data;
+        await loadMaintenanceActivity();
+      }
+    }
+
+    renderMaintenanceSession();
+  }
+
+  function renderMaintenanceSession() {
+    if (!dom.maintenanceLoginView) return;
+
+    const authenticated = Boolean(state.session && state.operator);
+    const clientView = authenticated && state.maintenanceView === "client";
+    dom.maintenanceLoginView.classList.toggle("is-hidden", authenticated);
+    dom.maintenanceSessionView.classList.toggle("is-hidden", !authenticated || clientView);
+    dom.maintenanceClientView.classList.toggle("is-hidden", !clientView);
+    dom.maintenanceAccess.classList.toggle("is-authenticated", authenticated);
+    if (!authenticated) dom.clientMaintenanceActions.classList.add("is-hidden");
+    dom.fieldMarkerLegend.classList.toggle("is-hidden", !authenticated);
+    syncMarkerDragState();
+
+    if (!authenticated) {
+      dom.maintenanceLabel.textContent = "Manutencao";
+      dom.maintenanceTitle.textContent = "Manutencao";
+      dom.maintenanceSubtitle.textContent = state.session
+        ? "Este usuario ainda nao possui um perfil de operador ativo."
+        : "Entre com o usuario autorizado no Supabase.";
+      return;
+    }
+
+    const operatorName = cleanValue(state.operator.nome) || "Operador";
+    const role = cleanValue(state.operator.papel) || "OPERADOR";
+    const canEdit = ["ADMIN", "MANUTENCAO", "EDITOR"].includes(role);
+    dom.maintenanceLabel.textContent = operatorName.split(/\s+/)[0];
+    dom.maintenanceTitle.textContent = "Area de manutencao";
+    dom.maintenanceSubtitle.textContent = "Cadastros e alteracoes ficam registrados no historico.";
+    dom.maintenanceProfileName.textContent = operatorName;
+    dom.maintenanceProfileRole.textContent = `Perfil ${role}`;
+    dom.maintenanceProfileInitials.textContent = getInitialsFromText(operatorName);
+    dom.maintenanceNewClient.disabled = !canEdit;
+    dom.clientMaintenanceActions.classList.toggle(
+      "is-hidden",
+      !state.selectedClient || !canEdit
+    );
+    renderMaintenanceActivity();
+  }
+
+  function showMaintenanceHome() {
+    state.maintenanceView = "home";
+    state.editingClientId = "";
+    state.locationDraft = null;
+    state.addressAutofill = {};
+    state.selectedLayer?.clearLayers();
+    setClientFormError("");
+    renderMaintenanceSession();
+  }
+
+  function canManageClients() {
+    return Boolean(
+      state.operator &&
+      ["ADMIN", "MANUTENCAO", "EDITOR"].includes(state.operator.papel)
+    );
+  }
+
+  function beginNewClientFlow() {
+    if (!canManageClients()) {
+      showToast("Este perfil nao possui permissao de edicao.");
+      return;
+    }
+
+    prepareNewClientForm();
+    startLocationPicker();
+  }
+
+  function beginNewClientFlowAtPoint(
+    latlng,
+    source = "ATALHO_PIN_ARRASTADO"
+  ) {
+    if (!canManageClients()) return;
+
+    prepareNewClientForm();
+    void confirmLocationDraft(latlng, {
+      source
+    });
+    showToast("Ponto marcado. Confira o endereco e complete o cadastro.");
+  }
+
+  function prepareNewClientForm() {
+    state.clientFormMode = "new";
+    state.editingClientId = "";
+    state.locationDraft = null;
+    state.addressAutofill = {};
+    state.maintenanceView = "client";
+    setClientFormError("");
+    populateClientForm(null);
+  }
+
+  function openClientForm(mode, client = null) {
+    if (!canManageClients()) {
+      showToast("Este perfil nao possui permissao de edicao.");
+      return;
+    }
+
+    if (mode === "new") {
+      beginNewClientFlow();
+      return;
+    }
+
+    if (!client) {
+      showToast("Selecione um cliente antes de editar.");
+      return;
+    }
+
+    state.clientFormMode = mode;
+    state.editingClientId = mode === "new" ? "" : client.id;
+    state.locationDraft = null;
+    state.maintenanceView = "client";
+    setClientFormError("");
+    populateClientForm(mode === "new" ? null : client);
+
+    if (!state.maintenanceOpen) {
+      closeClientPanel();
+      openMaintenancePanel({ preserve: true });
+    } else {
+      renderMaintenanceSession();
+    }
+  }
+
+  function populateClientForm(client) {
+    const mode = state.clientFormMode;
+    const raw = client?.raw || {};
+    const locationOnly = mode === "location";
+    const isNew = mode === "new";
+
+    dom.maintenanceClientForm.reset();
+    state.addressAutofill = {};
+    dom.maintenanceClientFields.classList.toggle("is-hidden", locationOnly);
+    dom.maintenanceLocationCard.classList.toggle("is-hidden", mode === "edit");
+    dom.maintenanceClientCnpj.disabled = !isNew;
+
+    const lockedAddressFields = [
+      dom.maintenanceClientUf,
+      dom.maintenanceClientCity,
+      dom.maintenanceClientDistrict,
+      dom.maintenanceClientCep,
+      dom.maintenanceClientStreet
+    ];
+    lockedAddressFields.forEach((field) => {
+      field.disabled = !isNew;
+    });
+
+    if (client) {
+      dom.maintenanceClientName.value = cleanValue(client.nomeFantasia);
+      dom.maintenanceClientLegalName.value = cleanValue(client.razaoSocial);
+      dom.maintenanceClientCnpj.value = cleanValue(client.cnpj);
+      dom.maintenanceClientContact.value = cleanValue(raw.contato_nome);
+      dom.maintenanceClientPhone.value = cleanValue(raw.telefone);
+      dom.maintenanceClientWhatsapp.value = cleanValue(raw.whatsapp);
+      dom.maintenanceClientEmail.value = cleanValue(raw.email);
+      dom.maintenanceClientUf.value = cleanValue(client.uf);
+      dom.maintenanceClientCity.value = cleanValue(client.municipio);
+      dom.maintenanceClientDistrict.value = cleanValue(client.bairro);
+      dom.maintenanceClientCep.value = cleanValue(client.cep);
+      dom.maintenanceClientStreet.value = cleanValue(client.logradouro);
+      dom.maintenanceClientNotes.value = cleanValue(raw.observacoes_comerciais);
+    }
+
+    if (isNew) {
+      dom.maintenanceClientFormTitle.textContent = "Dados do novo cliente";
+      dom.maintenanceClientFormNote.textContent = "O endereco e carregado pelo ponto; confira e complete somente o que faltar.";
+      dom.maintenanceClientSubmit.textContent = "Cadastrar cliente";
+      dom.maintenanceLocationTitle.textContent = "Ponto selecionado";
+      dom.maintenancePickLocation.textContent = "Alterar ponto";
+    } else if (locationOnly) {
+      dom.maintenanceClientFormTitle.textContent = "Ajustar ponto";
+      dom.maintenanceClientFormNote.textContent = client.displayName;
+      dom.maintenanceClientSubmit.textContent = "Confirmar novo ponto";
+      dom.maintenanceLocationTitle.textContent = "Novo ponto confirmado";
+      dom.maintenancePickLocation.textContent = "Selecionar no mapa";
+    } else {
+      dom.maintenanceClientFormTitle.textContent = "Editar comunicacao";
+      dom.maintenanceClientFormNote.textContent = client.displayName;
+      dom.maintenanceClientSubmit.textContent = "Salvar alteracoes";
+    }
+
+    updateLocationDraftUi();
+  }
+
+  function startLocationPicker() {
+    if (!canManageClients() || !["new", "location"].includes(state.clientFormMode)) return;
+
+    state.locationPickerActive = true;
+    dom.app.classList.add("is-picking-location");
+    dom.locationPickerBar.classList.remove("is-hidden");
+    dom.useDeviceLocation.disabled = !navigator.geolocation;
+    dom.useDeviceLocation.textContent = "Minha posicao";
+    closeMaintenancePanel();
+
+    const client = getClientById(state.editingClientId);
+    if (client?.hasValidCoordinates) {
+      state.map.flyTo(
+        [client.latitude, client.longitude],
+        Math.max(state.map.getZoom(), 16),
+        { duration: prefersReducedMotion() ? 0 : 0.45 }
+      );
+    }
+  }
+
+  function handleLocationPickerClick(event) {
+    if (!state.locationPickerActive || !event?.latlng) return false;
+
+    void confirmLocationDraft(event.latlng, {
+      source: "AJUSTE_MANUAL_MAPA"
+    });
+    return true;
+  }
+
+  function useDeviceLocation() {
+    if (!state.locationPickerActive) return;
+
+    if (!navigator.geolocation) {
+      showToast("A localizacao do aparelho nao esta disponivel neste navegador.");
+      return;
+    }
+
+    dom.useDeviceLocation.disabled = true;
+    dom.useDeviceLocation.textContent = "Localizando...";
+
+    navigator.geolocation.getCurrentPosition(
+      (position) => {
+        dom.useDeviceLocation.disabled = false;
+        dom.useDeviceLocation.textContent = "Minha posicao";
+        void confirmLocationDraft(
+          {
+            lat: position.coords.latitude,
+            lng: position.coords.longitude
+          },
+          {
+            source: "GPS_DISPOSITIVO",
+            accuracyMeters: Number(position.coords.accuracy)
+          }
+        );
+      },
+      (error) => {
+        dom.useDeviceLocation.disabled = false;
+        dom.useDeviceLocation.textContent = "Minha posicao";
+        const message =
+          error?.code === 1
+            ? "Permita o acesso a localizacao para usar a posicao do aparelho."
+            : "Nao foi possivel obter a localizacao do aparelho. Marque o ponto manualmente.";
+        showToast(message);
+      },
+      {
+        enableHighAccuracy: true,
+        timeout: 15000,
+        maximumAge: 0
+      }
+    );
+  }
+
+  async function confirmLocationDraft(latlng, options = {}) {
+    const latitude = Number(latlng?.lat);
+    const longitude = Number(latlng?.lng);
+
+    if (!isPointInBrazil(latitude, longitude)) {
+      showToast("Selecione um ponto dentro do Brasil.");
+      return;
+    }
+
+    if (state.clientFormMode === "new") {
+      clearAddressAutofillFromPreviousPoint();
+    }
+
+    state.locationDraft = {
+      latitude: Number(latitude.toFixed(7)),
+      longitude: Number(longitude.toFixed(7)),
+      source: options.source || "AJUSTE_MANUAL_MAPA",
+      accuracyMeters: Number.isFinite(options.accuracyMeters)
+        ? Math.round(options.accuracyMeters)
+        : null,
+      lookupStatus: "loading",
+      lookupMessage: "",
+      lookupProvider: "",
+      lookupAttribution: "",
+      formattedAddress: "",
+      address: null
+    };
+    state.maintenanceView = "client";
+    finishLocationPicker();
+    showLocationDraftMarker();
+    openMaintenancePanel({ preserve: true });
+    updateLocationDraftUi();
+
+    await resolveLocationAddress(state.locationDraft);
+  }
+
+  async function retryLocationAddress() {
+    if (!state.locationDraft || state.locationDraft.lookupStatus === "loading") return;
+    await resolveLocationAddress(state.locationDraft);
+  }
+
+  async function resolveLocationAddress(draft) {
+    if (!draft) return;
+
+    const latitude = draft.latitude;
+    const longitude = draft.longitude;
+    draft.lookupStatus = "loading";
+    draft.lookupMessage = "";
+    draft.lookupProvider = "";
+    updateLocationDraftUi();
+
+    try {
+      const suggestion = await reverseGeocodeLocation(draft);
+      if (!isCurrentLocationDraft(latitude, longitude)) return;
+
+      draft.lookupStatus = suggestion ? "resolved" : "unavailable";
+      draft.lookupMessage = suggestion
+        ? ""
+        : "Nenhum endereco foi encontrado para este ponto.";
+      draft.lookupProvider = suggestion?.provider || "";
+      draft.lookupAttribution = suggestion?.attribution || "";
+      draft.formattedAddress = suggestion?.formattedAddress || "";
+      draft.address = suggestion?.address || null;
+      applyLocationSuggestionToForm(suggestion?.address);
+    } catch (error) {
+      console.warn("[Mapa de clientes] Falha ao sugerir endereco do ponto:", error);
+      if (!isCurrentLocationDraft(latitude, longitude)) return;
+      draft.lookupStatus = "unavailable";
+      draft.lookupMessage = friendlyReverseGeocodeError(error);
+      draft.lookupProvider = "";
+      draft.lookupAttribution = "";
+      draft.formattedAddress = "";
+      draft.address = null;
+    } finally {
+      updateLocationDraftUi();
+    }
+  }
+
+  function isCurrentLocationDraft(latitude, longitude) {
+    return Boolean(
+      state.locationDraft &&
+      state.locationDraft.latitude === Number(latitude.toFixed(7)) &&
+      state.locationDraft.longitude === Number(longitude.toFixed(7))
+    );
+  }
+
+  function cancelLocationPicker() {
+    if (!state.locationPickerActive) return;
+    finishLocationPicker();
+    if (state.clientFormMode === "new" && !state.locationDraft) {
+      state.maintenanceView = "home";
+    }
+    openMaintenancePanel({ preserve: true });
+  }
+
+  function finishLocationPicker() {
+    state.locationPickerActive = false;
+    dom.app.classList.remove("is-picking-location");
+    dom.locationPickerBar.classList.add("is-hidden");
+  }
+
+  function showLocationDraftMarker() {
+    if (!state.locationDraft || !state.selectedLayer) return;
+    state.selectedLayer.clearLayers();
+    L.circleMarker(
+      [state.locationDraft.latitude, state.locationDraft.longitude],
+      {
+        radius: 10,
+        weight: 3,
+        color: "#ffffff",
+        fillColor: "#ff9f0a",
+        fillOpacity: 1
+      }
+    ).addTo(state.selectedLayer);
+  }
+
+  function updateLocationDraftUi() {
+    const draft = state.locationDraft;
+    dom.maintenanceLocationCoordinates.textContent = draft
+      ? `${draft.latitude.toFixed(7)}, ${draft.longitude.toFixed(7)}${
+          draft.accuracyMeters ? ` - precisao do aparelho: ~${draft.accuracyMeters} m` : ""
+        }`
+      : "Nenhum ponto novo selecionado";
+    dom.maintenanceLocationAddress.textContent = !draft
+      ? "Marque o ponto para sugerir o endereco."
+      : draft.lookupStatus === "loading"
+        ? "Consultando o endereco exato deste ponto..."
+        : draft.lookupStatus === "resolved" && draft.formattedAddress
+          ? `Endereco sugerido pelo ponto - confira antes de salvar: ${draft.formattedAddress}`
+          : draft.lookupMessage || "Endereco nao localizado automaticamente. Preencha ou confira os campos abaixo.";
+    dom.maintenanceRefreshAddress.classList.toggle(
+      "is-hidden",
+      !draft || draft.lookupStatus === "loading"
+    );
+    dom.maintenanceRefreshAddress.disabled = !draft || draft.lookupStatus === "loading";
+    dom.maintenanceLocationAttribution.classList.toggle(
+      "is-hidden",
+      !draft?.lookupAttribution
+    );
+    if (draft?.lookupAttribution) {
+      dom.maintenanceLocationAttribution.textContent = draft.lookupAttribution;
+    }
+    dom.maintenanceLocationPrivacy.classList.toggle("is-hidden", !draft);
+    syncClientFormSubmitState();
+    dom.maintenanceLocationCard.classList.toggle("has-point", Boolean(draft));
+    dom.maintenanceLocationCard.classList.toggle(
+      "is-resolving",
+      draft?.lookupStatus === "loading"
+    );
+    dom.maintenanceLocationCard.classList.toggle(
+      "has-address",
+      draft?.lookupStatus === "resolved"
+    );
+  }
+
+  async function reverseGeocodeLocation(draft) {
+    if (CONFIG.REVERSE_GEOCODING_FUNCTION && state.supabaseClient) {
+      try {
+        const edgeSuggestion = await reverseGeocodeWithEdgeFunction(draft);
+        if (edgeSuggestion) return edgeSuggestion;
+      } catch (edgeError) {
+        if (!CONFIG.GOOGLE_MAPS_BROWSER_KEY) throw edgeError;
+        console.warn(
+          "[Mapa de clientes] Edge Function indisponivel; tentando browser key:",
+          edgeError
+        );
+      }
+    }
+
+    const geocoder = await getGoogleGeocoder();
+    if (!geocoder) return null;
+
+    const response = await geocoder.geocode({
+      location: {
+        lat: draft.latitude,
+        lng: draft.longitude
+      },
+      language: "pt-BR",
+      region: "BR"
+    });
+    const result = selectBrazilGeocodeResult(response?.results || []);
+    if (!result) return null;
+
+    return {
+      formattedAddress: cleanValue(result.formatted_address),
+      address: extractAddressFromGeocodeResult(result),
+      provider: "GOOGLE_MAPS_BROWSER"
+    };
+  }
+
+  async function reverseGeocodeWithEdgeFunction(draft) {
+    const { data, error } = await state.supabaseClient.functions.invoke(
+      CONFIG.REVERSE_GEOCODING_FUNCTION,
+      {
+        body: {
+          latitude: draft.latitude,
+          longitude: draft.longitude
+        }
+      }
+    );
+
+    if (error) {
+      throw new Error(await readFunctionError(error));
+    }
+
+    if (!data?.ok) {
+      throw new Error(cleanValue(data?.error) || "Consulta de endereco indisponivel.");
+    }
+
+    if (!data.address && !data.formattedAddress) return null;
+    return {
+      formattedAddress: cleanValue(data.formattedAddress),
+      address: data.address || null,
+      provider: cleanValue(data.provider) || "EDGE_FUNCTION",
+      attribution: cleanValue(data.attribution)
+    };
+  }
+
+  async function readFunctionError(error) {
+    try {
+      const payload = await error?.context?.json?.();
+      if (payload?.error) return cleanValue(payload.error);
+    } catch {
+      // Usa a mensagem padrao abaixo.
+    }
+
+    return cleanValue(error?.message) || "Consulta de endereco indisponivel.";
+  }
+
+  function friendlyReverseGeocodeError(error) {
+    const message = cleanValue(error?.message || error);
+    if (/FunctionsHttpError|FunctionsRelayError|not found|404|Failed to send a request/i.test(message)) {
+      return "A funcao de endereco ainda nao foi publicada no Supabase.";
+    }
+    if (/GOOGLE_GEOCODING_API_KEY|Google/i.test(message)) {
+      return "A chave de geocodificacao do Google ainda nao foi configurada no Supabase.";
+    }
+    if (/nao autorizado|unauthorized|401|403/i.test(message)) {
+      return "Seu perfil nao tem autorizacao para consultar o endereco.";
+    }
+    return message || "Endereco nao localizado automaticamente. Preencha ou confira os campos abaixo.";
+  }
+
+  async function getGoogleGeocoder() {
+    if (!CONFIG.GOOGLE_MAPS_BROWSER_KEY) return null;
+
+    if (!state.googleGeocoderPromise) {
+      state.googleGeocoderPromise = (async () => {
+        if (!window.google?.maps?.importLibrary) {
+          await loadGoogleMapsJavascriptApi();
+        }
+
+        const geocodingLibrary = await window.google.maps.importLibrary("geocoding");
+        if (typeof geocodingLibrary?.Geocoder !== "function") {
+          throw new Error("Servico de geocodificacao do Google indisponivel.");
+        }
+
+        return new geocodingLibrary.Geocoder();
+      })().catch((error) => {
+        state.googleGeocoderPromise = null;
+        throw error;
+      });
+    }
+
+    return state.googleGeocoderPromise;
+  }
+
+  function loadGoogleMapsJavascriptApi() {
+    if (window.google?.maps?.importLibrary) return Promise.resolve();
+
+    return new Promise((resolve, reject) => {
+      const existing = document.querySelector("script[data-mhs-google-maps]");
+      if (existing) {
+        existing.addEventListener("load", resolve, { once: true });
+        existing.addEventListener(
+          "error",
+          () => reject(new Error("Google Maps nao carregou.")),
+          { once: true }
+        );
+        return;
+      }
+
+      const params = new URLSearchParams({
+        key: CONFIG.GOOGLE_MAPS_BROWSER_KEY,
+        v: "weekly",
+        language: "pt-BR",
+        region: "BR",
+        loading: "async"
+      });
+      const script = document.createElement("script");
+      script.dataset.mhsGoogleMaps = "true";
+      script.async = true;
+      script.src = `https://maps.googleapis.com/maps/api/js?${params.toString()}`;
+      script.addEventListener("load", resolve, { once: true });
+      script.addEventListener(
+        "error",
+        () => reject(new Error("Google Maps nao carregou.")),
+        { once: true }
+      );
+      document.head.appendChild(script);
+    });
+  }
+
+  function selectBrazilGeocodeResult(results) {
+    return results.find((result) => {
+      const components = Array.isArray(result?.address_components)
+        ? result.address_components
+        : [];
+      return components.some(
+        (component) =>
+          Array.isArray(component?.types) &&
+          component.types.includes("country") &&
+          cleanValue(component.short_name).toUpperCase() === "BR"
+      );
+    }) || results[0] || null;
+  }
+
+  function extractAddressFromGeocodeResult(result) {
+    const components = Array.isArray(result?.address_components)
+      ? result.address_components
+      : [];
+    const component = (types, property = "long_name") => {
+      const found = components.find((entry) =>
+        Array.isArray(entry?.types) && types.some((type) => entry.types.includes(type))
+      );
+      return cleanValue(found?.[property]);
+    };
+
+    const route = component(["route"]);
+    const number = component(["street_number"]);
+    const municipality = component([
+      "administrative_area_level_2",
+      "locality",
+      "administrative_area_level_3"
+    ]);
+
+    return {
+      logradouro: [route, number].filter(Boolean).join(", "),
+      bairro: component([
+        "sublocality_level_1",
+        "sublocality",
+        "neighborhood",
+        "administrative_area_level_4"
+      ]),
+      municipio: municipality,
+      uf: component(["administrative_area_level_1"], "short_name").toUpperCase(),
+      cep: component(["postal_code"])
+    };
+  }
+
+  function applyLocationSuggestionToForm(address) {
+    if (state.clientFormMode !== "new" || !address) return;
+
+    const fields = getAddressAutofillFields();
+    const values = {
+      uf: address.uf,
+      municipio: address.municipio,
+      bairro: address.bairro,
+      cep: address.cep,
+      logradouro: address.logradouro
+    };
+
+    for (const [key, field] of fields) {
+      const value = cleanValue(values[key]);
+      if (!field || field.disabled || cleanValue(field.value) || !value) continue;
+      field.value = value;
+      state.addressAutofill[key] = value;
+    }
+  }
+
+  function clearAddressAutofillFromPreviousPoint() {
+    for (const [key, field] of getAddressAutofillFields()) {
+      const automaticValue = cleanValue(state.addressAutofill[key]);
+      if (!automaticValue || !field) continue;
+      if (cleanValue(field.value) === automaticValue) field.value = "";
+    }
+    state.addressAutofill = {};
+  }
+
+  function getAddressAutofillFields() {
+    return [
+      ["uf", dom.maintenanceClientUf],
+      ["municipio", dom.maintenanceClientCity],
+      ["bairro", dom.maintenanceClientDistrict],
+      ["cep", dom.maintenanceClientCep],
+      ["logradouro", dom.maintenanceClientStreet]
+    ];
+  }
+
+  function isPointInBrazil(latitude, longitude) {
+    return Number.isFinite(latitude) &&
+      Number.isFinite(longitude) &&
+      latitude >= BRAZIL_BOUNDS[0][0] &&
+      latitude <= BRAZIL_BOUNDS[1][0] &&
+      longitude >= BRAZIL_BOUNDS[0][1] &&
+      longitude <= BRAZIL_BOUNDS[1][1];
+  }
+
+  async function handleClientFormSubmit(event) {
+    event.preventDefault();
+    if (!state.supabaseClient || !state.operator) return;
+
+    const mode = state.clientFormMode;
+    if (mode === "new" && state.locationDraft?.lookupStatus === "loading") {
+      setClientFormError("Aguarde a consulta automatica do endereco terminar.");
+      return;
+    }
+    if (["new", "location"].includes(mode) && !state.locationDraft) {
+      setClientFormError("Selecione e confira o ponto no mapa antes de salvar.");
+      return;
+    }
+
+    setClientFormBusy(true);
+    setClientFormError("");
+
+    try {
+      let response;
+      if (mode === "new") {
+        response = await state.supabaseClient
+          .schema(CONFIG.SCHEMA_NAME)
+          .rpc("cadastrar_cliente", { p_dados: buildNewClientPayload() });
+      } else if (mode === "edit") {
+        response = await state.supabaseClient
+          .schema(CONFIG.SCHEMA_NAME)
+          .rpc("atualizar_comunicacao", {
+            p_cliente_id: state.editingClientId,
+            p_dados: buildCommunicationPayload()
+          });
+      } else {
+        response = await state.supabaseClient
+          .schema(CONFIG.SCHEMA_NAME)
+          .rpc("confirmar_localizacao", {
+            p_cliente_id: state.editingClientId,
+            p_latitude: state.locationDraft.latitude,
+            p_longitude: state.locationDraft.longitude,
+            p_fonte: state.locationDraft.source || "AJUSTE_MANUAL_MAPA",
+            p_precisao_m: state.locationDraft.accuracyMeters,
+            p_observacao: buildLocationDraftObservation()
+          });
+      }
+
+      if (response.error) throw response.error;
+      const savedId = cleanValue(response.data?.[0]?.cliente_id) || state.editingClientId;
+
+      await reloadClientsData();
+      await loadMaintenanceActivity();
+      state.maintenanceView = "home";
+      state.locationDraft = null;
+      closeMaintenancePanel();
+
+      const savedClient = getClientById(savedId);
+      if (savedClient) openClient(savedClient, { focusMap: true });
+
+      showToast(
+        mode === "new"
+          ? "Cliente cadastrado com sucesso."
+          : mode === "edit"
+            ? "Dados de comunicacao atualizados."
+            : "Novo ponto confirmado e salvo."
+      );
+    } catch (error) {
+      console.error("[Mapa de clientes] Falha ao salvar manutencao:", error);
+      setClientFormError(friendlyMutationError(error));
+    } finally {
+      setClientFormBusy(false);
+    }
+  }
+
+  function buildNewClientPayload() {
+    return {
+      nome_fantasia: cleanValue(dom.maintenanceClientName.value),
+      razao_social: cleanValue(dom.maintenanceClientLegalName.value),
+      cnpj: cleanValue(dom.maintenanceClientCnpj.value),
+      contato_nome: cleanValue(dom.maintenanceClientContact.value),
+      telefone: cleanValue(dom.maintenanceClientPhone.value),
+      whatsapp: cleanValue(dom.maintenanceClientWhatsapp.value),
+      email: cleanValue(dom.maintenanceClientEmail.value),
+      uf: cleanValue(dom.maintenanceClientUf.value).toUpperCase(),
+      municipio: cleanValue(dom.maintenanceClientCity.value),
+      bairro: cleanValue(dom.maintenanceClientDistrict.value),
+      cep: cleanValue(dom.maintenanceClientCep.value),
+      logradouro: cleanValue(dom.maintenanceClientStreet.value),
+      observacoes_comerciais: cleanValue(dom.maintenanceClientNotes.value),
+      latitude: state.locationDraft.latitude,
+      longitude: state.locationDraft.longitude,
+      localizacao_fonte: state.locationDraft.source || "AJUSTE_MANUAL_MAPA",
+      localizacao_precisao_m: state.locationDraft.accuracyMeters,
+      localizacao_observacao: buildLocationDraftObservation()
+    };
+  }
+
+  function buildLocationDraftObservation() {
+    const formattedAddress = cleanValue(state.locationDraft?.formattedAddress);
+    const source = state.locationDraft?.source === "GPS_DISPOSITIVO"
+      ? "Posicao obtida pelo aparelho e confirmada pela equipe."
+      : "Ponto marcado e confirmado pela equipe no mapa.";
+    return formattedAddress
+      ? `${source} Endereco sugerido: ${formattedAddress}`.slice(0, 1000)
+      : source;
+  }
+
+  function buildCommunicationPayload() {
+    return {
+      nome_fantasia: cleanValue(dom.maintenanceClientName.value),
+      razao_social: cleanValue(dom.maintenanceClientLegalName.value),
+      contato_nome: cleanValue(dom.maintenanceClientContact.value),
+      telefone: cleanValue(dom.maintenanceClientPhone.value),
+      whatsapp: cleanValue(dom.maintenanceClientWhatsapp.value),
+      email: cleanValue(dom.maintenanceClientEmail.value),
+      observacoes_comerciais: cleanValue(dom.maintenanceClientNotes.value)
+    };
+  }
+
+  async function reloadClientsData() {
+    const rawRows = await fetchAllRows();
+    state.clients = rawRows.map(normalizeClient).filter(Boolean);
+    buildCoordinateCounts();
+    applyVisualSpread();
+    buildMarkers();
+    populateFilterOptions();
+    refreshMunicipioOptions();
+    applyFilters({ fit: false });
+
+    const invalidCoordinates = state.clients.filter(
+      (client) => !client.hasValidCoordinates
+    ).length;
+    dom.dataCaption.textContent = invalidCoordinates > 0
+      ? `${formatNumber(state.clients.length)} registros • ${formatNumber(invalidCoordinates)} sem coordenada`
+      : `${formatNumber(state.clients.length)} registros carregados`;
+  }
+
+  function getClientById(id) {
+    return state.clients.find((client) => String(client.id) === String(id)) || null;
+  }
+
+  function setClientFormBusy(busy) {
+    dom.maintenanceClientSubmit.dataset.busy = busy ? "true" : "false";
+    dom.maintenanceClientSubmit.disabled = busy || shouldWaitForLocationAddress();
+    if (busy) {
+      dom.maintenanceClientSubmit.textContent = "Salvando...";
+      return;
+    }
+
+    dom.maintenanceClientSubmit.textContent =
+      state.clientFormMode === "new"
+        ? "Cadastrar cliente"
+        : state.clientFormMode === "edit"
+          ? "Salvar alteracoes"
+          : "Confirmar novo ponto";
+  }
+
+  function shouldWaitForLocationAddress() {
+    return Boolean(
+      state.clientFormMode === "new" &&
+      state.locationDraft?.lookupStatus === "loading"
+    );
+  }
+
+  function syncClientFormSubmitState() {
+    if (!dom.maintenanceClientSubmit) return;
+    const busy = dom.maintenanceClientSubmit.dataset.busy === "true";
+    dom.maintenanceClientSubmit.disabled = busy || shouldWaitForLocationAddress();
+  }
+
+  function setClientFormError(message) {
+    dom.maintenanceClientError.textContent = message;
+    dom.maintenanceClientError.classList.toggle("is-hidden", !message);
+  }
+
+  function friendlyMutationError(error) {
+    const message = String(error?.message || error || "");
+    if (/Ja existe cliente com este CNPJ/i.test(message)) return "Este CNPJ ja esta cadastrado.";
+    if (/Operador nao autorizado/i.test(message)) return "Seu perfil nao possui permissao para esta operacao.";
+    if (/Coordenada fora/i.test(message)) return "O ponto selecionado esta fora dos limites do Brasil.";
+    if (/Informe nome fantasia/i.test(message)) return "Informe o nome fantasia ou a razao social.";
+    if (/schema cache|function.*not found/i.test(message)) return "O Supabase ainda nao atualizou as funcoes. Aguarde alguns segundos e tente novamente.";
+    return message || "Nao foi possivel salvar a alteracao.";
+  }
+
+  async function loadMaintenanceActivity() {
+    if (!state.supabaseClient || !state.operator) return;
+
+    const { data, error } = await state.supabaseClient
+      .schema(CONFIG.SCHEMA_NAME)
+      .from("vw_atividade_clientes")
+      .select("evento_id, ocorrido_em, tipo_evento, cliente_id, cliente, municipio, uf, operador")
+      .order("ocorrido_em", { ascending: false })
+      .limit(20);
+
+    if (error) {
+      console.error("[Mapa de clientes] Falha ao carregar atividade:", error);
+      state.maintenanceActivity = [];
+      return;
+    }
+
+    state.maintenanceActivity = Array.isArray(data) ? data : [];
+  }
+
+  function renderMaintenanceActivity() {
+    dom.maintenanceActivityList.replaceChildren();
+    dom.maintenanceActivityCount.textContent = formatNumber(state.maintenanceActivity.length);
+
+    if (!state.maintenanceActivity.length) {
+      const empty = document.createElement("p");
+      empty.className = "maintenance-message is-neutral";
+      empty.textContent = "Nenhuma alteracao registrada ainda.";
+      dom.maintenanceActivityList.appendChild(empty);
+      return;
+    }
+
+    state.maintenanceActivity.forEach((activity) => {
+      const item = document.createElement("article");
+      item.className = "maintenance-activity-item";
+
+      const copy = document.createElement("div");
+      const title = document.createElement("strong");
+      title.textContent = cleanValue(activity.cliente) || "Cliente";
+      const meta = document.createElement("small");
+      meta.textContent = [
+        [activity.municipio, activity.uf].filter(Boolean).join(" - "),
+        formatActivityDate(activity.ocorrido_em),
+        cleanValue(activity.operador)
+      ].filter(Boolean).join(" • ");
+      copy.append(title, meta);
+
+      const type = document.createElement("span");
+      type.textContent = formatActivityType(activity.tipo_evento);
+      item.append(copy, type);
+      dom.maintenanceActivityList.appendChild(item);
+    });
+  }
+
+  function setMaintenanceBusy(busy) {
+    dom.maintenanceLoginSubmit.disabled = busy;
+    dom.maintenanceLoginSubmit.textContent = busy ? "Entrando..." : "Entrar";
+    dom.maintenanceSignOut.disabled = busy;
+  }
+
+  function setMaintenanceError(message) {
+    dom.maintenanceLoginError.textContent = message;
+    dom.maintenanceLoginError.classList.toggle("is-hidden", !message);
+  }
+
+  function friendlyAuthError(error) {
+    const message = String(error?.message || error || "");
+    if (/invalid login credentials/i.test(message)) return "E-mail ou senha incorretos.";
+    if (/email not confirmed/i.test(message)) return "Confirme o e-mail antes de entrar.";
+    if (/perfil ativo de operador/i.test(message)) return message;
+    if (/failed to fetch|network/i.test(message)) return "Falha de rede ao autenticar.";
+    return message || "Nao foi possivel iniciar a sessao.";
+  }
+
+  function getInitialsFromText(value) {
+    const words = cleanValue(value).split(/\s+/).filter(Boolean);
+    if (!words.length) return "OP";
+    return `${words[0][0] || ""}${words[1]?.[0] || words[0][1] || ""}`
+      .toUpperCase()
+      .slice(0, 2);
+  }
+
+  function formatActivityDate(value) {
+    const date = new Date(value);
+    if (!Number.isFinite(date.getTime())) return "";
+    return new Intl.DateTimeFormat("pt-BR", {
+      day: "2-digit",
+      month: "2-digit",
+      hour: "2-digit",
+      minute: "2-digit"
+    }).format(date);
+  }
+
+  function formatActivityType(value) {
+    const type = cleanValue(value).toUpperCase();
+    if (type === "CADASTRO") return "Novo";
+    if (type === "REPOSICIONAMENTO") return "Ponto";
+    if (type === "GEOCODIFICACAO") return "Geo";
+    return "Atualizado";
   }
 
   function handleReportTabClick(event) {
@@ -1726,11 +3160,19 @@
 
       state.supabaseClient = window.supabase.createClient(supabaseUrl, key, {
         auth: {
-          persistSession: false,
-          autoRefreshToken: false,
-          detectSessionInUrl: false
+          persistSession: true,
+          autoRefreshToken: true,
+          detectSessionInUrl: true
         }
       });
+
+      try {
+        await syncAuthSession();
+      } catch (authError) {
+        console.warn("[Mapa de clientes] Sessao de manutencao indisponivel:", authError);
+        renderMaintenanceSession();
+      }
+      startAuthListener();
 
       const rawRows = await fetchAllRows();
       const normalized = rawRows
@@ -1784,7 +3226,7 @@
         .schema(CONFIG.SCHEMA_NAME)
         .from(CONFIG.TABLE_NAME)
         .select("*")
-        .order("cnpj", { ascending: true })
+        .order("cliente_id", { ascending: true })
         .range(from, from + CONFIG.PAGE_SIZE - 1);
 
       const { data, error } = await query;
@@ -1808,11 +3250,15 @@
   function normalizeClient(raw, index) {
     if (!raw || typeof raw !== "object") return null;
 
-    const latitude = toNumber(raw.latitude);
-    const longitude = toNumber(raw.longitude);
+    const latitude = toNumber(
+      raw.latitude_efetiva ?? raw.latitude_confirmada ?? raw.latitude
+    );
+    const longitude = toNumber(
+      raw.longitude_efetiva ?? raw.longitude_confirmada ?? raw.longitude
+    );
     const cnpj = cleanValue(raw.cnpj);
     const seq = cleanValue(raw.seq);
-    const id = cnpj || `${seq || "registro"}-${index}`;
+    const id = cleanValue(raw.cliente_id) || cnpj || `${seq || "registro"}-${index}`;
 
     const razaoSocial = cleanValue(raw.razao_social);
     const nomeFantasia = cleanOptionalValue(raw.nome_fantasia);
@@ -1827,9 +3273,22 @@
     const cep = cleanValue(raw.cep);
     const telefone = sanitizePhone(raw.telefone);
     const telefone1 = sanitizePhone(raw.telefone_1);
+    const whatsapp = sanitizePhone(raw.whatsapp);
+    const email = cleanOptionalValue(raw.email)?.toLowerCase() || "";
+    const contatoNome = cleanOptionalValue(raw.contato_nome);
     const cnae = cleanValue(raw.cnae);
     const geocodeStatus =
-      cleanValue(raw.geocode_status)?.toUpperCase() || "SEM_STATUS";
+      cleanValue(raw.precisao_efetiva || raw.localizacao_status || raw.geocode_status)
+        ?.toUpperCase() || "SEM_STATUS";
+    const origemRegistro = cleanValue(raw.origem_registro).toUpperCase();
+    const revisao = Number(raw.revisao || 1);
+    const classificacaoRegistro =
+      cleanValue(raw.classificacao_registro).toUpperCase() ||
+      (origemRegistro === "CADASTRO_CAMPO"
+        ? "NOVO"
+        : revisao > 1
+          ? "ATUALIZADO"
+          : "BASE_ORIGINAL");
 
     const hasValidCoordinates =
       Number.isFinite(latitude) &&
@@ -1861,7 +3320,12 @@
         cep,
         logradouro,
         cnae,
-        situacao
+        situacao,
+        telefone,
+        telefone1,
+        whatsapp,
+        email,
+        contatoNome
       ]
         .filter(Boolean)
         .join(" ")
@@ -1883,7 +3347,13 @@
       cep,
       telefone,
       telefone1,
+      whatsapp,
+      email,
+      contatoNome,
       cnae,
+      origemRegistro,
+      revisao,
+      classificacaoRegistro,
       latitude,
       longitude,
       visualLatitude: latitude,
@@ -1909,6 +3379,12 @@
         (state.coordinateCounts.get(client.coordinateKey) || 0) + 1
       );
     }
+  }
+
+  function getRecordClassificationLabel(client) {
+    if (client?.classificacaoRegistro === "NOVO") return "Novo cadastro";
+    if (client?.classificacaoRegistro === "ATUALIZADO") return "Atualizado em campo";
+    return "Base original";
   }
 
   function applyVisualSpread() {
@@ -1992,8 +3468,15 @@
     for (const client of state.clients) {
       if (!client.hasValidCoordinates) continue;
 
-      const statusClass =
-        normalizeSearchText(client.situacao) === "ativa" ? "" : "is-inactive";
+      const statusClass = [
+        normalizeSearchText(client.situacao) === "ativa" ? "" : "is-inactive",
+        client.classificacaoRegistro === "NOVO"
+          ? "is-new"
+          : client.classificacaoRegistro === "ATUALIZADO"
+            ? "is-updated"
+            : ""
+      ].filter(Boolean).join(" ");
+      const markerRecordLabel = getRecordClassificationLabel(client);
 
       const icon = L.divIcon({
         className: "client-marker-icon",
@@ -2006,16 +3489,285 @@
         icon,
         keyboard: true,
         riseOnHover: true,
-        title: client.displayName
+        draggable: true,
+        title: `${client.displayName} - ${markerRecordLabel}`
       });
 
       marker.client = client;
       marker.on("click", (event) => handleMarkerClick(client, event));
+      marker.on("dragstart", handleMarkerDragStart);
+      marker.on("drag", handleMarkerDrag);
+      marker.on("dragend", handleMarkerDragEnd);
+      marker.on("add", syncMarkerDragState);
       state.markerById.set(client.id, marker);
+    }
+
+    syncMarkerDragState();
+  }
+
+  function syncMarkerDragState() {
+    const draggable = canManageClients() && !state.pendingRelocation;
+
+    for (const marker of state.markerById.values()) {
+      if (!marker?.dragging) continue;
+      if (draggable) {
+        marker.dragging.enable();
+      } else {
+        marker.dragging.disable();
+      }
+      marker.getElement()?.classList.toggle("is-draggable", draggable);
     }
   }
 
+  function handleMarkerDragStart(event) {
+    if (!canManageClients() || state.pendingRelocation) return;
+
+    const marker = event.target;
+    marker.__mhsOriginalLatLng = marker.getLatLng();
+    showRelocationPreview(marker);
+  }
+
+  function handleMarkerDrag(event) {
+    const marker = event.target;
+    if (marker !== state.relocationPreviewSourceMarker) return;
+    state.relocationPreviewMarker?.setLatLng(marker.getLatLng());
+  }
+
+  function handleMarkerDragEnd(event) {
+    const marker = event.target;
+    const client = marker?.client;
+    const originalLatLng = marker?.__mhsOriginalLatLng;
+    const nextLatLng = marker?.getLatLng();
+    delete marker?.__mhsOriginalLatLng;
+
+    if (!canManageClients() || !client || !originalLatLng || !nextLatLng) {
+      return;
+    }
+
+    const unchanged =
+      Math.abs(originalLatLng.lat - nextLatLng.lat) < 0.0000001 &&
+      Math.abs(originalLatLng.lng - nextLatLng.lng) < 0.0000001;
+    if (unchanged) {
+      clearRelocationPreview(marker);
+      return;
+    }
+
+    if (!isPointInBrazil(nextLatLng.lat, nextLatLng.lng)) {
+      marker.setLatLng(originalLatLng);
+      clearRelocationPreview(marker);
+      showToast("O ponto deve permanecer dentro do Brasil.");
+      return;
+    }
+
+    state.pendingRelocation = {
+      marker,
+      client,
+      originalLatLng,
+      nextLatLng,
+      lookupStatus: "loading",
+      lookupMessage: "",
+      addressSuggestion: null
+    };
+    showRelocationConfirmation();
+    syncMarkerDragState();
+    void resolvePendingRelocationAddress(state.pendingRelocation);
+  }
+
+  function showRelocationConfirmation() {
+    const pending = state.pendingRelocation;
+    if (!pending) return;
+
+    dom.relocationClientName.textContent = pending.client.displayName;
+    dom.relocationCoordinates.textContent = `${pending.nextLatLng.lat.toFixed(7)}, ${pending.nextLatLng.lng.toFixed(7)}`;
+    dom.relocationLocationSummary.textContent = formatRelocationLocationSummary(pending);
+    dom.relocationConfirm.disabled = pending.lookupStatus === "loading";
+    dom.relocationConfirm.textContent = pending.lookupStatus === "loading"
+      ? "Consultando endereco..."
+      : "Sim, reposicionar";
+    dom.relocationCancel.disabled = false;
+    dom.relocationConfirmation.classList.remove("is-hidden");
+    if (pending.lookupStatus !== "loading") {
+      window.setTimeout(() => dom.relocationConfirm.focus(), 0);
+    }
+  }
+
+  function hideRelocationConfirmation() {
+    dom.relocationConfirmation.classList.add("is-hidden");
+    dom.relocationConfirm.disabled = false;
+    dom.relocationConfirm.textContent = "Sim, reposicionar";
+    dom.relocationLocationSummary.textContent = "";
+    dom.relocationCancel.disabled = false;
+  }
+
+  function cancelPendingRelocation() {
+    const pending = state.pendingRelocation;
+    if (!pending) return;
+
+    pending.marker.setLatLng(pending.originalLatLng);
+    state.pendingRelocation = null;
+    clearRelocationPreview(pending.marker);
+    hideRelocationConfirmation();
+    syncMarkerDragState();
+    showToast("Reposicionamento descartado. O ponto voltou ao local anterior.");
+  }
+
+  async function confirmPendingRelocation() {
+    const pending = state.pendingRelocation;
+    if (!pending || !state.supabaseClient) return;
+
+    dom.relocationConfirm.disabled = true;
+    dom.relocationCancel.disabled = true;
+    dom.relocationConfirm.textContent = "Salvando...";
+
+    try {
+      const { data, error } = await state.supabaseClient
+        .schema(CONFIG.SCHEMA_NAME)
+        .rpc("confirmar_localizacao", {
+          p_cliente_id: pending.client.id,
+          p_latitude: Number(pending.nextLatLng.lat.toFixed(7)),
+          p_longitude: Number(pending.nextLatLng.lng.toFixed(7)),
+          p_fonte: "ARRASTE_MANUAL_MAPA",
+          p_precisao_m: null,
+          p_observacao: "Ponto reposicionado por arraste e confirmado na interface de manutencao."
+        });
+
+      if (error) throw error;
+      const savedId = cleanValue(data?.[0]?.cliente_id) || pending.client.id;
+      state.pendingRelocation = null;
+      clearRelocationPreview(pending.marker);
+      hideRelocationConfirmation();
+      syncMarkerDragState();
+
+      await reloadClientsData();
+      await loadMaintenanceActivity();
+      const savedClient = getClientById(savedId);
+      if (savedClient) openClient(savedClient, { focusMap: true });
+      showToast("Nova localizacao confirmada e salva.");
+    } catch (error) {
+      console.error("[Mapa de clientes] Falha ao reposicionar por arraste:", error);
+      dom.relocationCoordinates.textContent = friendlyMutationError(error);
+      dom.relocationConfirm.disabled = false;
+      dom.relocationCancel.disabled = false;
+      dom.relocationConfirm.textContent = "Tentar novamente";
+    }
+  }
+
+  async function resolvePendingRelocationAddress(pending) {
+    if (!pending) return;
+
+    try {
+      const suggestion = await reverseGeocodeLocation({
+        latitude: pending.nextLatLng.lat,
+        longitude: pending.nextLatLng.lng
+      });
+      if (state.pendingRelocation !== pending) return;
+
+      pending.lookupStatus = suggestion ? "resolved" : "unavailable";
+      pending.addressSuggestion = suggestion || null;
+      pending.lookupMessage = suggestion
+        ? ""
+        : "Endereco deste novo ponto nao localizado automaticamente.";
+    } catch (error) {
+      console.warn("[Mapa de clientes] Falha ao consultar endereco do reposicionamento:", error);
+      if (state.pendingRelocation !== pending) return;
+
+      pending.lookupStatus = "unavailable";
+      pending.addressSuggestion = null;
+      pending.lookupMessage = friendlyReverseGeocodeError(error);
+    }
+
+    showRelocationConfirmation();
+  }
+
+  function formatRelocationLocationSummary(pending) {
+    if (pending.lookupStatus === "loading") {
+      return "Consultando rua, endereco e CEP do novo ponto...";
+    }
+
+    const address = pending.addressSuggestion?.address;
+    if (!address) {
+      return pending.lookupMessage || "Endereco do novo ponto nao localizado automaticamente.";
+    }
+
+    const regionalAddress = [
+      cleanValue(address.bairro),
+      cleanValue(address.municipio),
+      cleanValue(address.uf).toUpperCase()
+    ].filter(Boolean).join(" · ");
+    const lines = [
+      cleanValue(address.logradouro) ? `Rua: ${cleanValue(address.logradouro)}` : "",
+      regionalAddress ? `Endereco: ${regionalAddress}` : "",
+      cleanValue(address.cep) ? `CEP: ${cleanValue(address.cep)}` : ""
+    ].filter(Boolean);
+
+    if (cleanValue(pending.addressSuggestion?.attribution)) {
+      lines.push(cleanValue(pending.addressSuggestion.attribution));
+    }
+
+    return lines.join("\n") || cleanValue(pending.addressSuggestion?.formattedAddress) ||
+      "Endereco do novo ponto nao localizado automaticamente.";
+  }
+
+  function showRelocationPreview(marker) {
+    if (!marker || !state.relocationPreviewLayer || !window.L) return;
+
+    clearRelocationPreview();
+    state.relocationPreviewSourceMarker = marker;
+    marker.getElement()?.classList.add("is-relocation-source");
+    state.relocationPreviewMarker = L.marker(marker.getLatLng(), {
+      icon: createRelocationPinIcon(marker.client?.id),
+      interactive: false,
+      keyboard: false,
+      zIndexOffset: 1600
+    }).addTo(state.relocationPreviewLayer);
+    dom.app.classList.add("is-repositioning-client");
+  }
+
+  function clearRelocationPreview(marker = state.relocationPreviewSourceMarker) {
+    marker?.getElement()?.classList.remove("is-relocation-source");
+    state.relocationPreviewLayer?.clearLayers();
+    state.relocationPreviewMarker = null;
+    state.relocationPreviewSourceMarker = null;
+    if (!state.pendingRelocation) {
+      dom.app.classList.remove("is-repositioning-client");
+    }
+  }
+
+  function createRelocationPinIcon(clientId) {
+    const suffix = cleanValue(clientId).replace(/[^a-z0-9_-]/gi, "") || "cliente";
+    const gradientId = `relocation-pin-fill-${suffix}`;
+
+    return L.divIcon({
+      className: "relocation-marker-icon",
+      html: `<div class="relocation-marker" aria-hidden="true">
+        <svg class="relocation-marker-svg" viewBox="0 0 64 76" focusable="false">
+          <defs>
+            <linearGradient id="${gradientId}" x1="15" y1="8" x2="52" y2="66" gradientUnits="userSpaceOnUse">
+              <stop stop-color="#69d888"></stop>
+              <stop offset="0.5" stop-color="#34c759"></stop>
+              <stop offset="1" stop-color="#188b37"></stop>
+            </linearGradient>
+          </defs>
+          <path fill="url(#${gradientId})" d="M32 3C16.7 3 8 14.1 8 28.4c0 17.8 19.5 39.3 22.2 42.3a2.45 2.45 0 0 0 3.6 0C36.5 67.7 56 46.2 56 28.4 56 14.1 47.3 3 32 3Z"></path>
+          <circle cx="32" cy="28" r="12.5" fill="rgba(255,255,255,0.96)"></circle>
+          <circle cx="32" cy="28" r="5.6" fill="none" stroke="#209a43" stroke-width="2.5"></circle>
+          <path d="M32 18.6v4M32 33.4v4M22.6 28h4M37.4 28h4" fill="none" stroke="#209a43" stroke-width="2.5" stroke-linecap="round"></path>
+          <path d="M18.8 14.2C22.2 10.3 26.7 8 32 8" fill="none" stroke="rgba(255,255,255,0.34)" stroke-width="2.2" stroke-linecap="round"></path>
+        </svg>
+        <span class="relocation-marker-label">Reposicionando</span>
+      </div>`,
+      iconSize: [64, 76],
+      iconAnchor: [32, 71]
+    });
+  }
+
   function handleMarkerClick(client, event) {
+    if (state.pendingRelocation) return;
+    if (state.locationPickerActive) {
+      handleLocationPickerClick(event);
+      return;
+    }
+
     setRegionTarget(
       event?.latlng || L.latLng(client.visualLatitude, client.visualLongitude),
       getClickRegionSource()
@@ -3198,6 +4950,12 @@
     const nextLayer = state.baseLayers[nextMode];
     if (!nextLayer) return;
 
+    if (nextMode === BASE_LAYER.SATELLITE) {
+      resetSatelliteHealth();
+    } else {
+      stopSatelliteHealth();
+    }
+
     for (const layer of Object.values(state.baseLayers)) {
       if (layer && state.map.hasLayer(layer)) {
         state.map.removeLayer(layer);
@@ -3763,10 +5521,20 @@
     dom.clientPanel.classList.toggle("is-list-mode", listMode);
 
     const isActive = normalizeSearchText(client.situacao) === "ativa";
-    dom.clientStatus.textContent = client.situacao || "Sem situação";
+    const recordLabel = getRecordClassificationLabel(client);
+    dom.clientStatus.textContent =
+      client.classificacaoRegistro === "BASE_ORIGINAL"
+        ? client.situacao || "Sem situação"
+        : `${client.situacao || "Sem situação"} - ${recordLabel}`;
     dom.clientStatus.className = `status-badge ${
       isActive ? "" : "is-inactive"
-    }`;
+    } ${
+      client.classificacaoRegistro === "NOVO"
+        ? "is-new"
+        : client.classificacaoRegistro === "ATUALIZADO"
+          ? "is-updated"
+          : ""
+    }`.trim();
 
     dom.clientTitle.textContent = client.displayName;
     dom.clientSubtitle.textContent =
@@ -3781,6 +5549,7 @@
     }
 
     renderClientPreview(client);
+    renderClientCommercialCard(client);
 
     const precision =
       PRECISION_META[client.geocodeStatus] || PRECISION_META.SEM_STATUS;
@@ -3795,7 +5564,7 @@
     const address = formatAddress(client);
     setDetail("address", dom.detailAddress, address);
 
-    const phones = [client.telefone, client.telefone1]
+    const phones = [client.telefone, client.telefone1, client.whatsapp]
       .filter(Boolean)
       .map(formatPhone)
       .filter(Boolean);
@@ -3820,7 +5589,14 @@
     );
 
     renderSameCoordinate(client, { listMode });
+    renderNearbyClients(client, { listMode });
     updateClientActions(client);
+    dom.clientMaintenanceActions.classList.toggle(
+      "is-hidden",
+      listMode ||
+      !state.operator ||
+      !["ADMIN", "MANUTENCAO", "EDITOR"].includes(state.operator.papel)
+    );
 
     dom.clientPanel.classList.add("is-open");
     dom.clientPanel.classList.remove("is-collapsed");
@@ -3868,6 +5644,213 @@
     ].filter(Boolean);
 
     dom.previewMeta.textContent = meta.join(" / ");
+  }
+
+  function renderClientCommercialCard(client) {
+    const profile = getClientCommercialProfile(client);
+
+    dom.clientCommercialCard.className = `client-commercial-card is-${profile.level}`;
+    dom.clientCommercialCard.style.setProperty("--score", `${profile.score * 3.6}deg`);
+    dom.clientScoreValue.textContent = formatNumber(profile.score);
+    dom.clientScoreLabel.textContent = profile.label;
+    dom.clientScoreTitle.textContent = profile.title;
+    dom.clientScoreText.textContent = profile.text;
+
+    dom.clientSignalList.replaceChildren();
+    profile.signals.forEach((signal) => {
+      const chip = document.createElement("span");
+      chip.className = `client-signal is-${signal.tone}`;
+      chip.textContent = signal.label;
+      dom.clientSignalList.appendChild(chip);
+    });
+  }
+
+  function getClientCommercialProfile(client) {
+    const active = normalizeSearchText(client.situacao) === "ativa";
+    const hasPhone = Boolean(buildTelHref(client));
+    const addressParts = [
+      client.logradouro,
+      client.bairro,
+      client.municipio,
+      client.uf
+    ].filter((value) => cleanValue(value));
+    const addressQuality = addressParts.length / 4;
+    const precision = getPrecisionMeta(client.geocodeStatus);
+    const cityContext = getClientCityContext(client);
+    const nearbyCount = getNearbyClients(client, {
+      radiusMeters: 5000,
+      limit: Infinity
+    }).length;
+    const sameCoordinateCount = client.coordinateKey
+      ? state.coordinateCounts.get(client.coordinateKey) || 1
+      : 0;
+    const missingCritical = [
+      !client.cnpj,
+      !hasPhone,
+      !client.logradouro,
+      !client.bairro,
+      !client.cnae,
+      !client.hasValidCoordinates
+    ].filter(Boolean).length;
+
+    let score = 34;
+    score += active ? 18 : -10;
+    score += hasPhone ? 12 : -6;
+    score += client.cnpj ? 7 : -5;
+    score += client.cnae ? 5 : 0;
+    score += Math.round(addressQuality * 14);
+    score += client.hasValidCoordinates ? 8 : -18;
+    score += client.geocodeStatus === "PRECISO_LOGRADOURO" ? 8 : 0;
+    score += client.geocodeStatus === "APROX_SEDE_MUNICIPIO" ? -5 : 0;
+    score += Math.min(10, Math.floor(cityContext.count / 6));
+    score += nearbyCount >= 8 ? 8 : nearbyCount >= 3 ? 5 : nearbyCount > 0 ? 2 : 0;
+    score += sameCoordinateCount > 1 ? 2 : 0;
+    score -= missingCritical * 3;
+    score = clamp(Math.round(score), 0, active ? 100 : 64);
+
+    const level =
+      score >= 76 ? "high" : score >= 56 ? "medium" : score >= 38 ? "review" : "low";
+    const label =
+      level === "high"
+        ? "Alta"
+        : level === "medium"
+          ? "Media"
+          : level === "review"
+            ? "Revisar"
+            : "Baixa";
+    const title =
+      level === "high"
+        ? "Prioridade comercial alta"
+        : level === "medium"
+          ? "Bom alvo para abordagem"
+          : level === "review"
+            ? "Dados pedem revisao"
+            : "Prioridade baixa";
+    const text =
+      level === "high"
+        ? "Registro ativo, com bons sinais de contato/localizacao e presenca relevante no territorio."
+        : level === "medium"
+          ? "Cliente aproveitavel para rota ou prospeccao, com alguns pontos de dados para confirmar."
+          : level === "review"
+            ? "Antes da abordagem, vale revisar contato, endereco ou precisao do ponto."
+            : "Registro com poucos sinais comerciais ou situacao menos favoravel no momento.";
+
+    const dataQuality = Math.round(((6 - missingCritical) / 6) * 100);
+    const signals = [
+      {
+        label: active ? "Ativo" : "Situacao revisar",
+        tone: active ? "success" : "warning"
+      },
+      {
+        label: hasPhone ? "Contato ok" : "Sem telefone",
+        tone: hasPhone ? "success" : "warning"
+      },
+      {
+        label: client.hasValidCoordinates ? precision.title : "Sem coordenada",
+        tone: client.hasValidCoordinates ? "focus" : "warning"
+      },
+      {
+        label: `${formatNumber(cityContext.count)} na cidade`,
+        tone: cityContext.count >= 8 ? "focus" : "muted"
+      },
+      {
+        label: `${formatNumber(nearbyCount)} em 5 km`,
+        tone: nearbyCount ? "focus" : "muted"
+      },
+      {
+        label: `${formatNumber(dataQuality)}% dados`,
+        tone: dataQuality >= 80 ? "success" : dataQuality >= 55 ? "muted" : "warning"
+      }
+    ];
+
+    return { score, level, label, title, text, signals };
+  }
+
+  function getClientCityContext(client) {
+    const city = normalizeLookupText(client.municipio);
+    const uf = cleanValue(client.uf);
+    const clients = state.clients.filter((item) =>
+      normalizeLookupText(item.municipio) === city && (!uf || item.uf === uf)
+    );
+
+    return {
+      count: clients.length,
+      active: clients.filter((item) => normalizeSearchText(item.situacao) === "ativa").length
+    };
+  }
+
+  function getNearbyClients(client, { radiusMeters = 5000, limit = 5 } = {}) {
+    if (!client?.hasValidCoordinates || !state.map) return [];
+
+    const origin = [client.latitude, client.longitude];
+    return state.clients
+      .filter((item) =>
+        item.id !== client.id &&
+        item.hasValidCoordinates &&
+        item.coordinateKey !== client.coordinateKey
+      )
+      .map((item) => ({
+        client: item,
+        distance: state.map.distance(origin, [item.latitude, item.longitude])
+      }))
+      .filter((item) => item.distance <= radiusMeters)
+      .sort((a, b) => {
+        if (a.distance !== b.distance) return a.distance - b.distance;
+        return String(a.client.displayName).localeCompare(String(b.client.displayName), "pt-BR", {
+          sensitivity: "base",
+          numeric: true
+        });
+      })
+      .slice(0, limit);
+  }
+
+  function renderNearbyClients(client, { listMode = false } = {}) {
+    dom.nearbyClientList.replaceChildren();
+
+    if (listMode || !client.hasValidCoordinates) {
+      dom.nearbyClients.classList.add("is-hidden");
+      return;
+    }
+
+    const allNearby = getNearbyClients(client, { radiusMeters: 5000, limit: Infinity });
+    const nearby = allNearby.slice(0, 4);
+    dom.nearbyClients.classList.toggle("is-hidden", !nearby.length);
+    if (!nearby.length) return;
+
+    dom.nearbyTitle.textContent = "Clientes proximos";
+    dom.nearbyCount.textContent = `${formatNumber(allNearby.length)} em ate 5 km`;
+
+    nearby.forEach(({ client: item, distance }) => {
+      const button = document.createElement("button");
+      button.type = "button";
+      button.className = "nearby-client-card";
+      button.setAttribute("aria-label", `Abrir ficha de ${item.displayName}`);
+
+      const copy = document.createElement("span");
+      copy.className = "nearby-client-copy";
+
+      const title = document.createElement("strong");
+      title.textContent = item.displayName;
+
+      const meta = document.createElement("small");
+      meta.textContent = [
+        formatCompactDistance(distance),
+        [item.bairro, item.municipio, item.uf].filter(Boolean).join(" - ")
+      ].filter(Boolean).join(" / ");
+
+      copy.append(title, meta);
+
+      const status = document.createElement("span");
+      status.className =
+        normalizeSearchText(item.situacao) === "ativa"
+          ? "nearby-client-status"
+          : "nearby-client-status is-inactive";
+      status.textContent = item.situacao || "Base";
+
+      button.append(copy, status);
+      button.addEventListener("click", () => openClient(item, { focusMap: true }));
+      dom.nearbyClientList.appendChild(button);
+    });
   }
 
   function buildPointListSubtitle(group, client) {
@@ -3981,6 +5964,16 @@
     const mapsUrl = buildGoogleMapsUrl(client);
     dom.openMapsClient.classList.toggle("is-hidden", !mapsUrl);
     dom.openMapsClient.href = mapsUrl || "#";
+
+    const directionsUrl = buildDirectionsUrl(client);
+    dom.routeClient.classList.toggle("is-hidden", !directionsUrl);
+    dom.routeClient.href = directionsUrl || "#";
+    dom.routeClientBottom.classList.toggle("is-hidden", !directionsUrl);
+    dom.routeClientBottom.href = directionsUrl || "#";
+
+    const address = formatAddress(client);
+    dom.copyAddressClient.disabled = !address;
+    dom.copyMapsClient.disabled = !mapsUrl;
   }
 
   function closeClientPanel() {
@@ -4001,9 +5994,15 @@
 
     if (!client.hasValidCoordinates) return;
 
+    const recordClass =
+      client.classificacaoRegistro === "NOVO"
+        ? "is-new"
+        : client.classificacaoRegistro === "ATUALIZADO"
+          ? "is-updated"
+          : "";
     const icon = L.divIcon({
       className: "selected-marker-icon",
-      html: `<div class="selected-marker" aria-hidden="true"><span class="selected-marker-label">${escapeHtml(shortenLabel(client.displayName, 34))}</span></div>`,
+      html: `<div class="selected-marker ${recordClass}" aria-hidden="true"><span class="selected-marker-label">${escapeHtml(shortenLabel(client.displayName, 34))}</span></div>`,
       iconSize: [42, 42],
       iconAnchor: [21, 21]
     });
@@ -4029,8 +6028,8 @@
       client.cnpj ? `CNPJ: ${client.cnpj}` : null,
       client.situacao ? `Situação: ${client.situacao}` : null,
       formatAddress(client) ? `Endereço: ${formatAddress(client)}` : null,
-      [client.telefone, client.telefone1].filter(Boolean).length
-        ? `Telefone: ${[client.telefone, client.telefone1]
+      [client.telefone, client.telefone1, client.whatsapp].filter(Boolean).length
+        ? `Telefone: ${[client.telefone, client.telefone1, client.whatsapp]
             .filter(Boolean)
             .map(formatPhone)
             .join(" / ")}`
@@ -4050,6 +6049,46 @@
     } catch (error) {
       console.error("[Mapa de clientes] Falha ao copiar:", error);
       showToast("Não foi possível copiar automaticamente.");
+    }
+  }
+
+  async function copySelectedClientAddress() {
+    const client = state.selectedClient;
+    if (!client) return;
+
+    const address = formatAddress(client);
+    if (!address) {
+      showToast("Este cliente nao possui endereco para copiar.");
+      return;
+    }
+
+    await copyTextToClipboard(address, "Endereco copiado.");
+  }
+
+  async function copySelectedClientMaps() {
+    const client = state.selectedClient;
+    if (!client) return;
+
+    const mapsUrl = buildGoogleMapsUrl(client);
+    if (!mapsUrl) {
+      showToast("Este cliente nao possui link de mapa.");
+      return;
+    }
+
+    await copyTextToClipboard(mapsUrl, "Link do Maps copiado.");
+  }
+
+  async function copyTextToClipboard(text, successMessage) {
+    try {
+      if (navigator.clipboard && window.isSecureContext) {
+        await navigator.clipboard.writeText(text);
+      } else {
+        fallbackCopy(text);
+      }
+      showToast(successMessage);
+    } catch (error) {
+      console.error("[Mapa de clientes] Falha ao copiar:", error);
+      showToast("Nao foi possivel copiar automaticamente.");
     }
   }
 
@@ -4412,7 +6451,7 @@
   }
 
   function buildGoogleMapsUrl(client) {
-    if (client?.hasValidCoordinates) {
+    if (hasConfirmedMapPoint(client)) {
       const latitude = Number(client.latitude).toFixed(6);
       const longitude = Number(client.longitude).toFixed(6);
       return `https://www.google.com/maps/search/?api=1&query=${latitude},${longitude}`;
@@ -4421,6 +6460,25 @@
     const query = buildAddressQuery(client);
     if (!query) return "";
     return `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(query)}`;
+  }
+
+  function buildDirectionsUrl(client) {
+    if (hasConfirmedMapPoint(client)) {
+      const latitude = Number(client.latitude).toFixed(6);
+      const longitude = Number(client.longitude).toFixed(6);
+      return `https://www.google.com/maps/dir/?api=1&destination=${latitude},${longitude}`;
+    }
+
+    const query = buildAddressQuery(client);
+    if (!query) return "";
+    return `https://www.google.com/maps/dir/?api=1&destination=${encodeURIComponent(query)}`;
+  }
+
+  function hasConfirmedMapPoint(client) {
+    return Boolean(
+      client?.hasValidCoordinates &&
+      cleanValue(client.geocodeStatus).toUpperCase() === "CONFIRMADA_CAMPO"
+    );
   }
 
   function hasUsefulAddressText(address, client) {
@@ -4441,7 +6499,7 @@
   }
 
   function buildTelHref(client) {
-    const phone = [client.telefone, client.telefone1]
+    const phone = [client.telefone, client.telefone1, client.whatsapp]
       .map(normalizePhoneDigits)
       .find(Boolean);
 

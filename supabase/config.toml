@@ -1,0 +1,5 @@
+# Configuracao versionada das Edge Functions deste projeto.
+# A funcao de endereco exige o JWT do operador por padrao.
+
+[functions.reverse-geocode-ponto]
+verify_jwt = true

@@ -36,4 +36,7 @@ backup_google_maps/
 # Supabase / funcoes locais
 05_EDGE_FUNCTIONS/**/.env
 05_EDGE_FUNCTIONS/**/.env.*
-
+supabase/.env
+supabase/.env.*
+supabase/functions/.env
+supabase/functions/.env.*
