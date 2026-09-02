@@ -965,6 +965,10 @@ select:focus-visible {
   backdrop-filter: blur(22px) saturate(150%);
 }
 
+.relocation-confirmation:not(.is-hidden) {
+  animation: relocation-confirmation-in 220ms cubic-bezier(0.2, 0.8, 0.2, 1) both;
+}
+
 .relocation-confirmation strong,
 .relocation-confirmation p,
 .relocation-confirmation small {
@@ -3046,7 +3050,7 @@ select:focus-visible {
   height: 76px;
   transform-origin: 50% 93%;
   filter: drop-shadow(0 6px 5px rgba(10, 82, 29, 0.28));
-  animation: relocation-pin-pulse 1.35s ease-in-out infinite;
+  animation: relocation-pin-pulse 1.8s ease-in-out infinite;
 }
 
 .relocation-marker::before {
@@ -3092,7 +3096,18 @@ select:focus-visible {
 
 @keyframes relocation-pin-pulse {
   0%, 100% { transform: translateY(0) scale(1); }
-  50% { transform: translateY(-2px) scale(1.045); }
+  50% { transform: translateY(-2px) scale(1.025); }
+}
+
+@keyframes relocation-confirmation-in {
+  from {
+    opacity: 0;
+    transform: translate(-50%, 10px) scale(0.985);
+  }
+  to {
+    opacity: 1;
+    transform: translate(-50%, 0) scale(1);
+  }
 }
 
 .client-marker {

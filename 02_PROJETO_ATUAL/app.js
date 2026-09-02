@@ -39,7 +39,7 @@
     ).trim()
   });
 
-  const APP_VERSION_FALLBACK = "20260902-feira-operacao14";
+  const APP_VERSION_FALLBACK = "20260902-feira-operacao15";
   const APP_VERSION = getCurrentAppVersion();
   const VERSION_CHECK = Object.freeze({
     URL: "./version.json",
@@ -64,6 +64,17 @@
     BUTTON_ZOOM_STEP: 1,
     WHEEL_PX_PER_ZOOM_LEVEL: 46,
     WHEEL_DEBOUNCE_TIME: 12
+  });
+
+  // Durante o arraste, a borda do mapa vira uma zona de navegacao continua.
+  // A velocidade cresce gradualmente conforme o dedo se aproxima da borda,
+  // evitando saltos ao reposicionar pontos em telas touch.
+  const DRAG_AUTOPAN = Object.freeze({
+    DESKTOP_PADDING_PX: 76,
+    TOUCH_PADDING_PX: 112,
+    DESKTOP_SPEED: 8,
+    TOUCH_SPEED: 11,
+    PIN_MIN_SPEED: 2
   });
 
   const NEW_CLIENT_PIN = Object.freeze({
@@ -717,7 +728,10 @@
         startY: event.clientY,
         tipX: pinBounds.left + pinBounds.width * NEW_CLIENT_PIN.TIP_X_RATIO,
         tipY: pinBounds.top + pinBounds.height * NEW_CLIENT_PIN.TIP_Y_RATIO,
-        moved: false
+        moved: false,
+        pointerX: event.clientX,
+        pointerY: event.clientY,
+        autoPanFrame: 0
       };
       pin.classList.add("is-dragging");
       dom.app.classList.add("is-placing-new-client");
@@ -728,6 +742,8 @@
       const drag = state.newClientPinDrag;
       if (!drag || event.pointerId !== drag.pointerId) return;
 
+      drag.pointerX = event.clientX;
+      drag.pointerY = event.clientY;
       const offsetX = event.clientX - drag.tipX;
       const offsetY = event.clientY - drag.tipY;
       drag.moved = drag.moved || Math.hypot(
@@ -737,18 +753,15 @@
       pin.style.setProperty("--pin-drag-x", `${offsetX}px`);
       pin.style.setProperty("--pin-drag-y", `${offsetY}px`);
 
-      const latlng = getMapLatLngFromPointer(event.clientX, event.clientY);
-      if (latlng && isPointInBrazil(latlng.lat, latlng.lng)) {
-        renderNewClientPinPreview(latlng);
-      } else {
-        clearNewClientPinPreview();
-      }
+      updateNewClientPinPreviewFromDrag(drag);
+      startNewClientPinAutoPan(pin, drag);
     });
 
     const finishPinDrag = (event, cancelled = false) => {
       const drag = state.newClientPinDrag;
       if (!drag || event.pointerId !== drag.pointerId) return;
 
+      stopNewClientPinAutoPan(drag);
       state.newClientPinDrag = null;
       pin.classList.remove("is-dragging");
       dom.app.classList.remove("is-placing-new-client");
@@ -819,6 +832,97 @@
     state.pinPreviewLayer?.clearLayers();
     state.pinPreviewRing = null;
     state.pinPreviewMarker = null;
+  }
+
+  function updateNewClientPinPreviewFromDrag(drag) {
+    const latlng = getMapLatLngFromPointer(drag?.pointerX, drag?.pointerY);
+    if (latlng && isPointInBrazil(latlng.lat, latlng.lng)) {
+      renderNewClientPinPreview(latlng);
+      return;
+    }
+
+    clearNewClientPinPreview();
+  }
+
+  function startNewClientPinAutoPan(pin, drag) {
+    if (!drag || drag.autoPanFrame) return;
+
+    const panStep = () => {
+      drag.autoPanFrame = 0;
+      if (state.newClientPinDrag !== drag) return;
+
+      const movement = getDragAutoPanMovement(drag.pointerX, drag.pointerY);
+      if (!movement) {
+        dom.app.classList.remove("is-autopanning-map");
+        return;
+      }
+
+      dom.app.classList.add("is-autopanning-map");
+      state.map?.panBy(movement, { animate: false, noMoveStart: true });
+      updateNewClientPinPreviewFromDrag(drag);
+      drag.autoPanFrame = window.requestAnimationFrame(panStep);
+    };
+
+    drag.autoPanFrame = window.requestAnimationFrame(panStep);
+  }
+
+  function stopNewClientPinAutoPan(drag = state.newClientPinDrag) {
+    if (drag?.autoPanFrame) {
+      window.cancelAnimationFrame(drag.autoPanFrame);
+      drag.autoPanFrame = 0;
+    }
+    dom.app.classList.remove("is-autopanning-map");
+  }
+
+  function getDragAutoPanMovement(clientX, clientY) {
+    const container = state.map?.getContainer();
+    if (!container || !Number.isFinite(clientX) || !Number.isFinite(clientY)) return null;
+
+    const bounds = container.getBoundingClientRect();
+    const settings = getDragAutoPanSettings();
+    const x = getAutoPanAxisMovement(clientX - bounds.left, bounds.width, settings);
+    const y = getAutoPanAxisMovement(clientY - bounds.top, bounds.height, settings);
+
+    return x || y ? [x, y] : null;
+  }
+
+  function getAutoPanAxisMovement(position, length, settings) {
+    if (!Number.isFinite(position) || !Number.isFinite(length) || length <= 0) return 0;
+
+    const padding = Math.min(settings.padding, Math.max(24, length / 3));
+    let direction = 0;
+    let intensity = 0;
+
+    if (position < padding) {
+      direction = -1;
+      intensity = (padding - position) / padding;
+    } else if (position > length - padding) {
+      direction = 1;
+      intensity = (position - (length - padding)) / padding;
+    }
+
+    if (!direction) return 0;
+    const easedIntensity = Math.min(1, Math.max(0, intensity)) ** 1.55;
+    const speed = DRAG_AUTOPAN.PIN_MIN_SPEED +
+      (settings.speed - DRAG_AUTOPAN.PIN_MIN_SPEED) * easedIntensity;
+    return direction * Math.round(speed);
+  }
+
+  function getDragAutoPanSettings() {
+    const touchInput = window.matchMedia?.("(pointer: coarse)")?.matches ||
+      Number(window.navigator?.maxTouchPoints || 0) > 0;
+    return touchInput
+      ? { padding: DRAG_AUTOPAN.TOUCH_PADDING_PX, speed: DRAG_AUTOPAN.TOUCH_SPEED }
+      : { padding: DRAG_AUTOPAN.DESKTOP_PADDING_PX, speed: DRAG_AUTOPAN.DESKTOP_SPEED };
+  }
+
+  function getMarkerAutoPanOptions() {
+    const settings = getDragAutoPanSettings();
+    return {
+      autoPan: true,
+      autoPanPadding: [settings.padding, settings.padding],
+      autoPanSpeed: settings.speed
+    };
   }
 
   function initBaseLayers() {
@@ -3490,6 +3594,7 @@
         keyboard: true,
         riseOnHover: true,
         draggable: true,
+        ...getMarkerAutoPanOptions(),
         title: `${client.displayName} - ${markerRecordLabel}`
       });
 
@@ -3524,6 +3629,7 @@
 
     const marker = event.target;
     marker.__mhsOriginalLatLng = marker.getLatLng();
+    Object.assign(marker.options, getMarkerAutoPanOptions());
     showRelocationPreview(marker);
   }
 
