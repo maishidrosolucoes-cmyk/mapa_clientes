@@ -39,7 +39,7 @@
     ).trim()
   });
 
-  const APP_VERSION_FALLBACK = "20260902-feira-operacao18";
+  const APP_VERSION_FALLBACK = "20260902-feira-operacao20";
   const APP_VERSION = getCurrentAppVersion();
   const VERSION_CHECK = Object.freeze({
     URL: "./version.json",
@@ -3370,6 +3370,15 @@
     const longitude = toNumber(
       raw.longitude_efetiva ?? raw.longitude_confirmada ?? raw.longitude
     );
+    const confirmedLatitude = toNumber(raw.latitude_confirmada);
+    const confirmedLongitude = toNumber(raw.longitude_confirmada);
+    const hasConfirmedLocation =
+      Number.isFinite(confirmedLatitude) &&
+      Number.isFinite(confirmedLongitude) &&
+      confirmedLatitude >= BRAZIL_BOUNDS[0][0] &&
+      confirmedLatitude <= BRAZIL_BOUNDS[1][0] &&
+      confirmedLongitude >= BRAZIL_BOUNDS[0][1] &&
+      confirmedLongitude <= BRAZIL_BOUNDS[1][1];
     const cnpj = cleanValue(raw.cnpj);
     const seq = cleanValue(raw.seq);
     const id = cleanValue(raw.cliente_id) || cnpj || `${seq || "registro"}-${index}`;
@@ -3391,8 +3400,9 @@
     const email = cleanOptionalValue(raw.email)?.toLowerCase() || "";
     const contatoNome = cleanOptionalValue(raw.contato_nome);
     const cnae = cleanValue(raw.cnae);
-    const geocodeStatus =
-      cleanValue(raw.precisao_efetiva || raw.localizacao_status || raw.geocode_status)
+    const geocodeStatus = hasConfirmedLocation
+      ? "CONFIRMADA_CAMPO"
+      : cleanValue(raw.precisao_efetiva || raw.localizacao_status || raw.geocode_status)
         ?.toUpperCase() || "SEM_STATUS";
     const origemRegistro = cleanValue(raw.origem_registro).toUpperCase();
     const revisao = Number(raw.revisao || 1);

@@ -2245,7 +2245,7 @@ select:focus-visible {
   overflow-y: auto;
   -webkit-overflow-scrolling: touch;
   overscroll-behavior: contain;
-  padding: 16px 18px 20px;
+  padding: 16px 18px calc(24px + var(--safe-bottom));
 }
 
 .client-preview {
@@ -2684,7 +2684,7 @@ select:focus-visible {
   gap: 8px;
   margin-top: 16px;
   position: sticky;
-  bottom: -20px;
+  bottom: 0;
   z-index: 2;
   padding: 10px 0 0;
   background: linear-gradient(
@@ -3427,7 +3427,7 @@ select:focus-visible {
   .panel-body {
     height: auto;
     max-height: calc(72dvh - 105px);
-    padding: 14px 16px calc(18px + var(--safe-bottom));
+    padding: 14px 16px calc(24px + var(--safe-bottom));
   }
 
   .client-panel.is-list-mode .panel-body {
@@ -3883,7 +3883,7 @@ select:focus-visible {
 
   .panel-body {
     max-height: calc(78dvh - 96px);
-    padding: 12px 14px calc(16px + var(--safe-bottom));
+    padding: 12px 14px calc(24px + var(--safe-bottom));
   }
 
   .client-panel.is-list-mode .panel-body {
@@ -3941,7 +3941,6 @@ select:focus-visible {
   }
 
   .panel-actions {
-    bottom: calc(-16px - var(--safe-bottom));
     gap: 7px;
   }
 
