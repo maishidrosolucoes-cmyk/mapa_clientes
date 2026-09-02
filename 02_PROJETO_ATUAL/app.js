@@ -39,7 +39,7 @@
     ).trim()
   });
 
-  const APP_VERSION_FALLBACK = "20260902-feira-operacao16";
+  const APP_VERSION_FALLBACK = "20260902-feira-operacao17";
   const APP_VERSION = getCurrentAppVersion();
   const VERSION_CHECK = Object.freeze({
     URL: "./version.json",
@@ -64,6 +64,8 @@
     BUTTON_ZOOM_STEP: 1,
     WHEEL_PX_PER_ZOOM_LEVEL: 46,
     WHEEL_DEBOUNCE_TIME: 12,
+    TOUCH_SETTLE_MS: 110,
+    TOUCH_TAP_TOLERANCE: 24,
     TOUCH_INERTIA_DECELERATION: 3000,
     TOUCH_INERTIA_MAX_SPEED: 2400,
     TOUCH_EASE_LINEARITY: 0.23
@@ -348,6 +350,7 @@
     toastTimer: null,
     searchTimer: null,
     regionTimer: null,
+    mapMotionTimer: null,
     regionTargetLatLng: null,
     regionTargetSource: "center",
     municipalityCatalog: null,
@@ -602,9 +605,12 @@
       wheelPxPerZoomLevel: MAP_MOTION.WHEEL_PX_PER_ZOOM_LEVEL,
       wheelDebounceTime: MAP_MOTION.WHEEL_DEBOUNCE_TIME,
       bounceAtZoomLimits: false,
-      fadeAnimation: true,
+      // A transicao de opacidade de cada tile e bonita em desktop, mas custa
+      // frames em touch quando ha uma imagem de satelite em movimento.
+      fadeAnimation: !mobileViewport,
       markerZoomAnimation: !mobileViewport,
       zoomAnimationThreshold: 3,
+      tapTolerance: mobileViewport ? MAP_MOTION.TOUCH_TAP_TOLERANCE : 15,
       inertia: true,
       inertiaDeceleration: mobileViewport ? MAP_MOTION.TOUCH_INERTIA_DECELERATION : 2600,
       inertiaMaxSpeed: mobileViewport ? MAP_MOTION.TOUCH_INERTIA_MAX_SPEED : 1700,
@@ -700,8 +706,9 @@
     });
 
     state.map.on("mousemove", handleRegionPointerMove);
+    state.map.on("movestart zoomstart", handleMapMotionStart);
     state.map.on("move zoom", scheduleRegionReadoutUpdate);
-    state.map.on("moveend zoomend", updateRegionReadout);
+    state.map.on("moveend zoomend", handleMapMotionEnd);
     updateRegionReadout();
 
     applyViewMode({ persist: false });
@@ -861,6 +868,7 @@
       }
 
       dom.app.classList.add("is-autopanning-map");
+      handleMapMotionStart();
       state.map?.panBy(movement, { animate: false, noMoveStart: true });
       updateNewClientPinPreviewFromDrag(drag);
       drag.autoPanFrame = window.requestAnimationFrame(panStep);
@@ -875,6 +883,7 @@
       drag.autoPanFrame = 0;
     }
     dom.app.classList.remove("is-autopanning-map");
+    handleMapMotionEnd();
   }
 
   function getDragAutoPanMovement(clientX, clientY) {
@@ -912,8 +921,7 @@
   }
 
   function getDragAutoPanSettings() {
-    const touchInput = window.matchMedia?.("(pointer: coarse)")?.matches ||
-      Number(window.navigator?.maxTouchPoints || 0) > 0;
+    const touchInput = isTouchInteraction();
     return touchInput
       ? { padding: DRAG_AUTOPAN.TOUCH_PADDING_PX, speed: DRAG_AUTOPAN.TOUCH_SPEED }
       : { padding: DRAG_AUTOPAN.DESKTOP_PADDING_PX, speed: DRAG_AUTOPAN.DESKTOP_SPEED };
@@ -932,14 +940,14 @@
     const mobileViewport = isMobileViewport();
     const tileOptions = {
       noWrap: false,
-      // Carrega o proximo trecho enquanto o mapa se move. Em touch, esperar
-      // o movimento terminar deixava a imagem de satelite aparentar travada.
+      // Mantem um pequeno buffer visual durante o pan. Em touch, os novos
+      // tiles so sao decodificados depois do gesto para priorizar o dedo.
       keepBuffer: mobileViewport ? 3 : 2,
-      updateWhenIdle: false,
+      updateWhenIdle: mobileViewport,
       // Durante zoom usamos a imagem atual escalonada e trocamos os tiles ao
-      // final; durante pan, a atualizacao e continua e mais leve.
+      // final. Em touch, novos tiles so sao decodificados apos o gesto.
       updateWhenZooming: false,
-      updateInterval: mobileViewport ? 70 : 60
+      updateInterval: mobileViewport ? 120 : 60
     };
 
     const standardRasterTileOptions = {
@@ -4710,6 +4718,8 @@
 
   function scheduleRegionReadoutUpdate() {
     clearTimeout(state.regionTimer);
+    if (isTouchInteraction()) return;
+
     dom.regionReadout.classList.add("is-updating");
 
     state.regionTimer = window.setTimeout(() => {
@@ -4721,6 +4731,28 @@
     if (isMobileViewport()) return;
     setRegionTarget(event.latlng, "cursor");
     scheduleRegionReadoutUpdate();
+  }
+
+  function handleMapMotionStart() {
+    if (!isTouchInteraction()) return;
+
+    window.clearTimeout(state.mapMotionTimer);
+    state.mapMotionTimer = null;
+    dom.app.classList.add("is-map-moving");
+  }
+
+  function handleMapMotionEnd() {
+    if (!isTouchInteraction()) {
+      updateRegionReadout();
+      return;
+    }
+
+    window.clearTimeout(state.mapMotionTimer);
+    state.mapMotionTimer = window.setTimeout(() => {
+      state.mapMotionTimer = null;
+      dom.app.classList.remove("is-map-moving");
+      updateRegionReadout();
+    }, MAP_MOTION.TOUCH_SETTLE_MS);
   }
 
   function setRegionTarget(latlng, source = "center") {
@@ -6782,11 +6814,15 @@
     return window.matchMedia?.("(prefers-reduced-motion: reduce)")?.matches;
   }
 
-  function isMobileViewport() {
-    return (
-      window.matchMedia?.("(max-width: 640px), (pointer: coarse)")?.matches ||
-      window.innerWidth <= 640
+  function isTouchInteraction() {
+    return Boolean(
+      window.matchMedia?.("(pointer: coarse)")?.matches ||
+      Number(window.navigator?.maxTouchPoints || 0) > 0
     );
+  }
+
+  function isMobileViewport() {
+    return isTouchInteraction() || window.innerWidth <= 640;
   }
 
   function clamp(value, min, max) {

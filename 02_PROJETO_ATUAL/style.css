@@ -1406,6 +1406,20 @@ select:focus-visible {
   transform: translateY(2px);
 }
 
+/* Durante um gesto touch, a prioridade e acompanhar o dedo. Os paineis
+   mantem sua aparencia por cor e sombra, mas suspendem o blur caro ate o
+   mapa estabilizar novamente. */
+.app-shell.is-map-moving .glass-toolbar,
+.app-shell.is-map-moving .glass-filters,
+.app-shell.is-map-moving .map-controls,
+.app-shell.is-map-moving .region-readout,
+.app-shell.is-map-moving .field-marker-legend,
+.app-shell.is-map-moving .leaflet-control-attribution,
+.app-shell.is-map-moving .marker-cluster .cluster-bubble {
+  -webkit-backdrop-filter: none;
+  backdrop-filter: none;
+}
+
 .region-readout span {
   width: fit-content;
   padding: 3px 7px;
