@@ -900,7 +900,8 @@ select:focus-visible {
   line-height: 1.45;
 }
 
-.location-picker-bar {
+.location-picker-bar,
+.route-picker-bar {
   position: fixed;
   z-index: 960;
   left: 50%;
@@ -921,26 +922,33 @@ select:focus-visible {
 }
 
 .location-picker-bar strong,
-.location-picker-bar small {
+.location-picker-bar small,
+.route-picker-bar strong,
+.route-picker-bar small {
   display: block;
 }
 
-.location-picker-bar strong {
+.location-picker-bar strong,
+.route-picker-bar strong {
   font-size: 13px;
 }
 
-.location-picker-bar small {
+.location-picker-bar small,
+.route-picker-bar small {
   margin-top: 2px;
   color: var(--text-soft);
   font-size: 10.5px;
 }
 
-.location-picker-actions {
+.location-picker-actions,
+.route-picker-actions {
   display: flex;
   gap: 7px;
 }
 
-.location-picker-actions .secondary-action {
+.location-picker-actions .secondary-action,
+.route-picker-actions .secondary-action,
+.route-picker-actions .primary-action {
   min-height: 36px;
   margin: 0;
   padding-inline: 10px;
@@ -1185,6 +1193,42 @@ select:focus-visible {
   transition: opacity 140ms ease;
 }
 
+.app-shell.is-selecting-route .leaflet-container {
+  cursor: crosshair !important;
+}
+
+.app-shell.is-selecting-route .client-marker:not(.is-route-selected) {
+  opacity: 0.64;
+}
+
+.client-marker.is-route-selected {
+  z-index: 2;
+  border-color: #fff;
+  background: #5856d6;
+  box-shadow:
+    0 4px 11px rgba(54, 52, 162, 0.32),
+    0 0 0 3px rgba(88, 86, 214, 0.25);
+  color: #fff;
+  transform: translateY(-2px) scale(1.18);
+}
+
+.client-marker.is-route-selected::before {
+  content: attr(data-route-order);
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  color: inherit;
+  font-size: 10px;
+  font-weight: 800;
+  line-height: 1;
+}
+
+.client-marker.is-route-selected::after {
+  inset: -8px;
+  border-color: rgba(88, 86, 214, 0.4);
+}
+
 .marker-legend-dot {
   width: 9px;
   height: 9px;
@@ -1245,7 +1289,7 @@ select:focus-visible {
 
 .maintenance-actions {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 8px;
   margin-top: 12px;
 }
@@ -1255,6 +1299,10 @@ select:focus-visible {
   width: 100%;
   min-height: 42px;
   margin: 0;
+}
+
+.maintenance-actions .primary-action {
+  grid-column: 1 / -1;
 }
 
 .maintenance-actions .primary-action:disabled {
@@ -1307,6 +1355,169 @@ select:focus-visible {
   color: var(--accent-strong);
   font-size: 9.5px;
   font-weight: 760;
+}
+
+.route-draft-card {
+  display: grid;
+  gap: 10px;
+  padding: 12px;
+  border: 1px solid rgba(0, 122, 255, 0.16);
+  border-radius: 16px;
+  background: linear-gradient(135deg, rgba(0, 122, 255, 0.08), rgba(88, 86, 214, 0.045));
+}
+
+.route-draft-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.route-draft-heading strong,
+.route-draft-heading small {
+  display: block;
+}
+
+.route-draft-heading strong {
+  font-size: 13px;
+}
+
+.route-draft-heading small {
+  margin-top: 3px;
+  color: var(--text-soft);
+  font-size: 10.5px;
+}
+
+.route-draft-heading .secondary-action {
+  flex: 0 0 auto;
+  min-height: 35px;
+  margin: 0;
+  padding-inline: 10px;
+  font-size: 11.5px;
+}
+
+.route-stop-list,
+.maintenance-routes-saved-list {
+  display: grid;
+  gap: 7px;
+}
+
+.route-stop-empty {
+  margin: 0;
+  padding: 10px;
+  border: 1px dashed rgba(60, 60, 67, 0.16);
+  border-radius: 12px;
+  color: var(--text-soft);
+  font-size: 11.5px;
+  line-height: 1.4;
+}
+
+.route-stop-item,
+.saved-route-item {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 9px;
+  padding: 9px 10px;
+  border: 1px solid rgba(60, 60, 67, 0.08);
+  border-radius: 13px;
+  background: rgba(255, 255, 255, 0.72);
+}
+
+.route-stop-order {
+  display: grid;
+  width: 24px;
+  height: 24px;
+  place-items: center;
+  border-radius: 9px;
+  background: rgba(0, 122, 255, 0.12);
+  color: var(--accent-strong);
+  font-size: 11px;
+  font-weight: 790;
+}
+
+.route-stop-copy,
+.saved-route-item > div {
+  min-width: 0;
+}
+
+.route-stop-copy strong,
+.route-stop-copy small,
+.saved-route-item strong,
+.saved-route-item small {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.route-stop-copy strong,
+.saved-route-item strong {
+  color: var(--text);
+  font-size: 12px;
+  font-weight: 740;
+}
+
+.route-stop-copy small,
+.saved-route-item small {
+  margin-top: 2px;
+  color: var(--text-soft);
+  font-size: 10.5px;
+}
+
+.route-stop-actions {
+  display: flex;
+  gap: 3px;
+}
+
+.route-stop-action {
+  display: grid;
+  width: 26px;
+  height: 26px;
+  padding: 0;
+  place-items: center;
+  border: 1px solid rgba(60, 60, 67, 0.1);
+  border-radius: 8px;
+  background: rgba(118, 118, 128, 0.07);
+  color: var(--text-soft);
+  cursor: pointer;
+  font-size: 15px;
+  line-height: 1;
+}
+
+.route-stop-action:hover:not(:disabled) {
+  border-color: rgba(0, 122, 255, 0.26);
+  background: rgba(0, 122, 255, 0.09);
+  color: var(--accent-strong);
+}
+
+.route-stop-action:disabled {
+  cursor: not-allowed;
+  opacity: 0.35;
+}
+
+.maintenance-routes-saved {
+  display: grid;
+  gap: 8px;
+  margin-top: 18px;
+}
+
+.saved-route-item {
+  grid-template-columns: minmax(0, 1fr) auto;
+}
+
+.saved-route-status {
+  max-width: 92px;
+  padding: 4px 7px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: rgba(88, 86, 214, 0.1);
+  color: #4b49ba;
+  font-size: 9.5px;
+  font-weight: 760;
+  text-align: center;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .report-tab-button:hover {
@@ -2314,7 +2525,7 @@ select:focus-visible {
 
 .client-quick-actions {
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(86px, 1fr));
   gap: 7px;
   margin-top: 10px;
 }
@@ -2382,6 +2593,18 @@ select:focus-visible {
   stroke-linecap: round;
   stroke-linejoin: round;
   stroke-width: 1.9;
+}
+
+.quick-action-share {
+  border-color: rgba(88, 86, 214, 0.18);
+  background: rgba(88, 86, 214, 0.06);
+  color: #4b49ba;
+}
+
+.quick-action-share:hover {
+  border-color: rgba(88, 86, 214, 0.32);
+  background: rgba(88, 86, 214, 0.11);
+  color: #3d3aa3;
 }
 
 .panel-section-title {
@@ -3673,7 +3896,8 @@ select:focus-visible {
     flex: 1 1 auto;
   }
 
-  .location-picker-bar {
+  .location-picker-bar,
+  .route-picker-bar {
     bottom: calc(8px + var(--safe-bottom));
     width: calc(100vw - 12px);
     grid-template-columns: minmax(0, 1fr);
@@ -3681,8 +3905,10 @@ select:focus-visible {
     border-radius: 15px;
   }
 
-  .location-picker-actions {
+  .location-picker-actions,
+  .route-picker-actions {
     justify-content: flex-end;
+    flex-wrap: wrap;
   }
 
   .relocation-confirmation {

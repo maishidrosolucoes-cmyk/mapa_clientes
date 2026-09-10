@@ -35,7 +35,7 @@
     rel="stylesheet"
     href="https://unpkg.com/maplibre-gl@5/dist/maplibre-gl.css"
   >
-  <link rel="stylesheet" href="./style.css?v=20260902-feira-operacao20">
+  <link rel="stylesheet" href="./style.css?v=20260910-operacao24">
 </head>
 
 <body>
@@ -203,6 +203,15 @@
             </select>
           </label>
 
+          <label class="select-control">
+            <span class="sr-only">Operação de campo</span>
+            <select id="filter-operacao" aria-label="Filtrar por operação de campo">
+              <option value="">Todos os registros</option>
+              <option value="NOVOS">Novos cadastros</option>
+              <option value="REPOSICIONADOS">Pontos reposicionados</option>
+            </select>
+          </label>
+
           <button id="reset-filters" class="text-button" type="button">
             Limpar filtros
           </button>
@@ -325,6 +334,9 @@
             <button id="maintenance-new-client" class="primary-action" type="button">
               Marcar novo ponto
             </button>
+            <button id="maintenance-routes" class="secondary-action" type="button">
+              Rotas de visita
+            </button>
             <button id="maintenance-sign-out" class="secondary-action" type="button">
               Sair
             </button>
@@ -340,6 +352,55 @@
               <strong id="maintenance-activity-count">0</strong>
             </div>
             <div id="maintenance-activity-list" class="maintenance-activity-list"></div>
+          </section>
+        </div>
+
+        <div id="maintenance-route-view" class="maintenance-body is-hidden">
+          <form id="maintenance-route-form" class="maintenance-form">
+            <div class="maintenance-form-heading">
+              <button id="maintenance-route-back" class="text-button" type="button">Voltar</button>
+              <div>
+                <strong>Nova rota de visita</strong>
+                <small>Defina o roteiro e selecione as paradas diretamente no mapa.</small>
+              </div>
+            </div>
+
+            <label class="maintenance-field">
+              <span>Nome da rota *</span>
+              <input id="maintenance-route-title" type="text" maxlength="160" placeholder="Ex.: Visitas de quinta - Mossoró" required>
+            </label>
+
+            <label class="maintenance-field">
+              <span>Data planejada</span>
+              <input id="maintenance-route-date" type="date">
+            </label>
+
+            <label class="maintenance-field">
+              <span>Observações do roteiro</span>
+              <textarea id="maintenance-route-notes" rows="3" maxlength="1200" placeholder="Objetivo, responsável ou instruções da rota"></textarea>
+            </label>
+
+            <section class="route-draft-card" aria-label="Paradas selecionadas">
+              <div class="route-draft-heading">
+                <div>
+                  <strong>Paradas da rota</strong>
+                  <small id="maintenance-route-count">Nenhum cliente selecionado</small>
+                </div>
+                <button id="maintenance-route-pick" class="secondary-action" type="button">Selecionar no mapa</button>
+              </div>
+              <div id="maintenance-route-stop-list" class="route-stop-list"></div>
+            </section>
+
+            <p id="maintenance-route-error" class="maintenance-message is-hidden" role="alert"></p>
+            <button id="maintenance-route-submit" class="primary-action" type="submit">Salvar rota pré-definida</button>
+          </form>
+
+          <section class="maintenance-routes-saved" aria-label="Rotas salvas">
+            <div class="panel-section-title">
+              <span>Rotas pré-definidas</span>
+              <strong id="maintenance-routes-saved-count">0</strong>
+            </div>
+            <div id="maintenance-routes-saved-list" class="maintenance-routes-saved-list"></div>
           </section>
         </div>
 
@@ -440,6 +501,17 @@
       </div>
     </div>
 
+    <div id="route-picker-bar" class="route-picker-bar is-hidden" role="status">
+      <div>
+        <strong>Monte a rota no mapa</strong>
+        <small id="route-picker-count">Toque nos clientes para definir a ordem das visitas.</small>
+      </div>
+      <div class="route-picker-actions">
+        <button id="route-picker-review" class="primary-action" type="button">Ver roteiro</button>
+        <button id="route-picker-cancel" class="secondary-action" type="button">Cancelar seleção</button>
+      </div>
+    </div>
+
     <section id="relocation-confirmation" class="relocation-confirmation is-hidden" role="dialog" aria-modal="true" aria-labelledby="relocation-title">
       <div>
         <strong id="relocation-title">Reposicionar localizacao?</strong>
@@ -518,6 +590,16 @@
               <path d="M14 11a5 5 0 0 0-7.07 0l-2 2A5 5 0 0 0 12 20.07l1.15-1.15"></path>
             </svg>
             Link Maps
+          </button>
+          <button id="share-client-link" class="quick-action quick-action-share" type="button">
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+              <circle cx="18" cy="5" r="3"></circle>
+              <circle cx="6" cy="12" r="3"></circle>
+              <circle cx="18" cy="19" r="3"></circle>
+              <path d="m8.6 10.5 6.8-4"></path>
+              <path d="m8.6 13.5 6.8 4"></path>
+            </svg>
+            Enviar link
           </button>
         </section>
 
@@ -907,7 +989,7 @@
   <script src="https://unpkg.com/maplibre-gl@5/dist/maplibre-gl.js"></script>
   <script src="https://unpkg.com/@maplibre/maplibre-gl-leaflet/leaflet-maplibre-gl.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
-  <script src="./config.js?v=20260902-feira-operacao20"></script>
-  <script src="./app.js?v=20260902-feira-operacao20"></script>
+  <script src="./config.js?v=20260910-operacao24"></script>
+  <script src="./app.js?v=20260910-operacao24"></script>
 </body>
 </html>

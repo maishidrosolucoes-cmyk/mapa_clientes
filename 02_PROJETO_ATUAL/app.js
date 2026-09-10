@@ -39,7 +39,7 @@
     ).trim()
   });
 
-  const APP_VERSION_FALLBACK = "20260902-feira-operacao20";
+  const APP_VERSION_FALLBACK = "20260910-operacao24";
   const APP_VERSION = getCurrentAppVersion();
   const VERSION_CHECK = Object.freeze({
     URL: "./version.json",
@@ -332,7 +332,11 @@
     operator: null,
     authSubscription: null,
     maintenanceActivity: [],
+    visitRoutes: [],
+    visitRoutesError: null,
     maintenanceView: "home",
+    routeDraft: null,
+    routeSelectionActive: false,
     clientFormMode: "new",
     editingClientId: "",
     locationDraft: null,
@@ -345,7 +349,8 @@
     filters: {
       uf: "",
       municipio: "",
-      situacao: ""
+      situacao: "",
+      operacao: ""
     },
     toastTimer: null,
     searchTimer: null,
@@ -399,6 +404,7 @@
       "filter-uf",
       "filter-municipio",
       "filter-situacao",
+      "filter-operacao",
       "reset-filters",
       "maintenance-access",
       "maintenance-label",
@@ -434,9 +440,23 @@
       "maintenance-profile-name",
       "maintenance-profile-role",
       "maintenance-new-client",
+      "maintenance-routes",
       "maintenance-sign-out",
       "maintenance-activity-count",
       "maintenance-activity-list",
+      "maintenance-route-view",
+      "maintenance-route-form",
+      "maintenance-route-back",
+      "maintenance-route-title",
+      "maintenance-route-date",
+      "maintenance-route-notes",
+      "maintenance-route-count",
+      "maintenance-route-pick",
+      "maintenance-route-stop-list",
+      "maintenance-route-error",
+      "maintenance-route-submit",
+      "maintenance-routes-saved-count",
+      "maintenance-routes-saved-list",
       "maintenance-client-view",
       "maintenance-client-form",
       "maintenance-client-back",
@@ -469,6 +489,10 @@
       "location-picker-bar",
       "use-device-location",
       "cancel-location-picker",
+      "route-picker-bar",
+      "route-picker-count",
+      "route-picker-review",
+      "route-picker-cancel",
       "relocation-confirmation",
       "relocation-client-name",
       "relocation-coordinates",
@@ -493,6 +517,7 @@
       "route-client",
       "copy-address-client",
       "copy-maps-client",
+      "share-client-link",
       "coordinate-preview",
       "coordinate-preview-title",
       "coordinate-preview-count",
@@ -708,7 +733,12 @@
     if (!pin) return;
 
     pin.addEventListener("pointerdown", (event) => {
-      if (event.button > 0 || state.locationPickerActive || state.pendingRelocation) {
+      if (
+        event.button > 0 ||
+        state.locationPickerActive ||
+        state.pendingRelocation ||
+        state.routeSelectionActive
+      ) {
         return;
       }
 
@@ -1067,6 +1097,7 @@
 
     dom.clearSearch.addEventListener("click", () => {
       dom.searchInput.value = "";
+      clearSharedClientLink();
       state.searchQuery = "";
       state.searchFocusClientId = "";
       state.searchIntentOverride = null;
@@ -1080,6 +1111,7 @@
     });
 
     dom.filterUf.addEventListener("change", () => {
+      clearSharedClientLink();
       state.filters.uf = dom.filterUf.value;
       refreshMunicipioOptions();
       state.filters.municipio = dom.filterMunicipio.value;
@@ -1088,13 +1120,22 @@
     });
 
     dom.filterMunicipio.addEventListener("change", () => {
+      clearSharedClientLink();
       state.filters.municipio = dom.filterMunicipio.value;
       persistUiState();
       applyFilters({ fit: true });
     });
 
     dom.filterSituacao.addEventListener("change", () => {
+      clearSharedClientLink();
       state.filters.situacao = dom.filterSituacao.value;
+      persistUiState();
+      applyFilters({ fit: true });
+    });
+
+    dom.filterOperacao.addEventListener("change", () => {
+      clearSharedClientLink();
+      state.filters.operacao = dom.filterOperacao.value;
       persistUiState();
       applyFilters({ fit: true });
     });
@@ -1105,12 +1146,18 @@
     dom.maintenanceLoginForm.addEventListener("submit", handleMaintenanceLogin);
     dom.maintenanceSignOut.addEventListener("click", handleMaintenanceSignOut);
     dom.maintenanceNewClient.addEventListener("click", beginNewClientFlow);
+    dom.maintenanceRoutes.addEventListener("click", openRouteBuilder);
+    dom.maintenanceRouteBack.addEventListener("click", cancelRouteBuilder);
+    dom.maintenanceRouteForm.addEventListener("submit", saveRouteDraft);
+    dom.maintenanceRoutePick.addEventListener("click", startRoutePicker);
     dom.maintenanceClientBack.addEventListener("click", showMaintenanceHome);
     dom.maintenanceClientForm.addEventListener("submit", handleClientFormSubmit);
     dom.maintenancePickLocation.addEventListener("click", startLocationPicker);
     dom.maintenanceRefreshAddress.addEventListener("click", retryLocationAddress);
     dom.useDeviceLocation.addEventListener("click", useDeviceLocation);
     dom.cancelLocationPicker.addEventListener("click", cancelLocationPicker);
+    dom.routePickerReview.addEventListener("click", reviewRouteSelection);
+    dom.routePickerCancel.addEventListener("click", cancelRouteSelection);
     dom.relocationCancel.addEventListener("click", cancelPendingRelocation);
     dom.relocationConfirm.addEventListener("click", confirmPendingRelocation);
     dom.editClient.addEventListener("click", () => openClientForm("edit", state.selectedClient));
@@ -1131,6 +1178,7 @@
     dom.copyClient.addEventListener("click", copySelectedClient);
     dom.copyAddressClient.addEventListener("click", copySelectedClientAddress);
     dom.copyMapsClient.addEventListener("click", copySelectedClientMaps);
+    dom.shareClientLink.addEventListener("click", shareSelectedClientLink);
     dom.openReport.addEventListener("click", openReportPanel);
     dom.closeReport.addEventListener("click", closeReportPanel);
     dom.reportSelectVisibleArea.addEventListener("click", selectVisibleMapArea);
@@ -1262,6 +1310,8 @@
             ? dom.maintenancePickLocation
             : dom.maintenanceClientName;
         focusTarget.focus();
+      } else if (state.operator && state.maintenanceView === "route") {
+        dom.maintenanceRouteTitle.focus();
       } else if (state.operator) {
         dom.maintenanceNewClient.focus();
       } else {
@@ -1364,6 +1414,9 @@
     state.session = session || null;
     state.operator = null;
     state.maintenanceActivity = [];
+    state.visitRoutes = [];
+    state.visitRoutesError = null;
+    cancelRouteSelection({ reopen: false });
 
     if (state.session?.user?.id) {
       const { data, error } = await state.supabaseClient
@@ -1378,7 +1431,7 @@
         console.error("[Mapa de clientes] Falha ao validar operador:", error);
       } else if (data) {
         state.operator = data;
-        await loadMaintenanceActivity();
+        await Promise.all([loadMaintenanceActivity(), loadVisitRoutes()]);
       }
     }
 
@@ -1390,9 +1443,11 @@
 
     const authenticated = Boolean(state.session && state.operator);
     const clientView = authenticated && state.maintenanceView === "client";
+    const routeView = authenticated && state.maintenanceView === "route";
     dom.maintenanceLoginView.classList.toggle("is-hidden", authenticated);
-    dom.maintenanceSessionView.classList.toggle("is-hidden", !authenticated || clientView);
+    dom.maintenanceSessionView.classList.toggle("is-hidden", !authenticated || clientView || routeView);
     dom.maintenanceClientView.classList.toggle("is-hidden", !clientView);
+    dom.maintenanceRouteView.classList.toggle("is-hidden", !routeView);
     dom.maintenanceAccess.classList.toggle("is-authenticated", authenticated);
     if (!authenticated) dom.clientMaintenanceActions.classList.add("is-hidden");
     dom.fieldMarkerLegend.classList.toggle("is-hidden", !authenticated);
@@ -1412,16 +1467,18 @@
     const canEdit = ["ADMIN", "MANUTENCAO", "EDITOR"].includes(role);
     dom.maintenanceLabel.textContent = operatorName.split(/\s+/)[0];
     dom.maintenanceTitle.textContent = "Area de manutencao";
-    dom.maintenanceSubtitle.textContent = "Cadastros e alteracoes ficam registrados no historico.";
+    dom.maintenanceSubtitle.textContent = "Cadastros, roteiros e alteracoes ficam registrados no historico.";
     dom.maintenanceProfileName.textContent = operatorName;
     dom.maintenanceProfileRole.textContent = `Perfil ${role}`;
     dom.maintenanceProfileInitials.textContent = getInitialsFromText(operatorName);
     dom.maintenanceNewClient.disabled = !canEdit;
+    dom.maintenanceRoutes.disabled = !canEdit;
     dom.clientMaintenanceActions.classList.toggle(
       "is-hidden",
       !state.selectedClient || !canEdit
     );
     renderMaintenanceActivity();
+    renderRouteBuilder();
   }
 
   function showMaintenanceHome() {
@@ -1439,6 +1496,350 @@
       state.operator &&
       ["ADMIN", "MANUTENCAO", "EDITOR"].includes(state.operator.papel)
     );
+  }
+
+  function createRouteDraft() {
+    return {
+      title: "",
+      plannedDate: "",
+      notes: "",
+      clientIds: []
+    };
+  }
+
+  function openRouteBuilder() {
+    if (!canManageClients()) {
+      showToast("Este perfil nao possui permissao para montar rotas.");
+      return;
+    }
+
+    state.routeDraft ||= createRouteDraft();
+    state.maintenanceView = "route";
+    setRouteFormError("");
+    renderMaintenanceSession();
+  }
+
+  function cancelRouteBuilder() {
+    cancelRouteSelection({ reopen: false });
+    state.routeDraft = null;
+    state.maintenanceView = "home";
+    setRouteFormError("");
+    renderMaintenanceSession();
+  }
+
+  function readRouteDraftFields() {
+    if (!state.routeDraft) state.routeDraft = createRouteDraft();
+    state.routeDraft.title = cleanValue(dom.maintenanceRouteTitle.value);
+    state.routeDraft.plannedDate = cleanValue(dom.maintenanceRouteDate.value);
+    state.routeDraft.notes = cleanValue(dom.maintenanceRouteNotes.value);
+  }
+
+  function getRouteDraftClients() {
+    const ids = state.routeDraft?.clientIds || [];
+    return ids.map((id) => getClientById(id)).filter(Boolean);
+  }
+
+  function renderRouteBuilder() {
+    if (!state.routeDraft) {
+      renderSavedVisitRoutes();
+      return;
+    }
+
+    dom.maintenanceRouteTitle.value = state.routeDraft.title || "";
+    dom.maintenanceRouteDate.value = state.routeDraft.plannedDate || "";
+    dom.maintenanceRouteNotes.value = state.routeDraft.notes || "";
+    dom.maintenanceRoutePick.disabled = !canManageClients();
+    dom.maintenanceRouteSubmit.disabled = !canManageClients();
+    renderRouteDraftStops();
+    renderSavedVisitRoutes();
+  }
+
+  function renderRouteDraftStops() {
+    const clients = getRouteDraftClients();
+    const count = clients.length;
+    dom.maintenanceRouteCount.textContent = count
+      ? `${formatNumber(count)} ${count === 1 ? "parada selecionada" : "paradas selecionadas"}`
+      : "Nenhum cliente selecionado";
+    dom.routePickerCount.textContent = count
+      ? `${formatNumber(count)} ${count === 1 ? "parada" : "paradas"} na rota. Toque em outro cliente para incluir ou remover.`
+      : "Toque nos clientes para definir a ordem das visitas.";
+    dom.maintenanceRouteStopList.replaceChildren();
+
+    if (!count) {
+      const empty = document.createElement("p");
+      empty.className = "route-stop-empty";
+      empty.textContent = "Selecione os clientes no mapa para montar o roteiro.";
+      dom.maintenanceRouteStopList.appendChild(empty);
+      return;
+    }
+
+    clients.forEach((client, index) => {
+      const item = document.createElement("article");
+      item.className = "route-stop-item";
+
+      const order = document.createElement("span");
+      order.className = "route-stop-order";
+      order.textContent = String(index + 1);
+
+      const copy = document.createElement("div");
+      copy.className = "route-stop-copy";
+      const title = document.createElement("strong");
+      title.textContent = client.displayName;
+      const meta = document.createElement("small");
+      meta.textContent = [client.bairro, [client.municipio, client.uf].filter(Boolean).join(" - ")]
+        .filter(Boolean)
+        .join(" / ") || "Localizacao do cliente";
+      copy.append(title, meta);
+
+      const actions = document.createElement("div");
+      actions.className = "route-stop-actions";
+      const up = createRouteStopAction("↑", "Mover parada para cima", () => moveRouteStop(index, -1));
+      const down = createRouteStopAction("↓", "Mover parada para baixo", () => moveRouteStop(index, 1));
+      const remove = createRouteStopAction("×", `Remover ${client.displayName} da rota`, () => toggleRouteClient(client));
+      up.disabled = index === 0;
+      down.disabled = index === clients.length - 1;
+      actions.append(up, down, remove);
+
+      item.append(order, copy, actions);
+      dom.maintenanceRouteStopList.appendChild(item);
+    });
+  }
+
+  function createRouteStopAction(text, label, onClick) {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = "route-stop-action";
+    button.textContent = text;
+    button.setAttribute("aria-label", label);
+    button.title = label;
+    button.addEventListener("click", onClick);
+    return button;
+  }
+
+  function moveRouteStop(index, direction) {
+    if (!state.routeDraft) return;
+    const destination = index + direction;
+    const ids = state.routeDraft.clientIds;
+    if (destination < 0 || destination >= ids.length) return;
+    [ids[index], ids[destination]] = [ids[destination], ids[index]];
+    renderRouteDraftStops();
+    syncRouteMarkerSelection();
+  }
+
+  function startRoutePicker() {
+    if (!canManageClients()) return;
+    readRouteDraftFields();
+    state.routeSelectionActive = true;
+    dom.app.classList.add("is-selecting-route");
+    dom.routePickerBar.classList.remove("is-hidden");
+    if (state.viewMode !== "markers") setViewMode("markers");
+    closeMaintenancePanel();
+    syncMarkerDragState();
+    syncRouteMarkerSelection();
+    showToast("Toque nos pontos para montar a ordem das visitas.");
+  }
+
+  function reviewRouteSelection() {
+    cancelRouteSelection({ reopen: true });
+  }
+
+  function cancelRouteSelection({ reopen = true } = {}) {
+    const wasSelecting = state.routeSelectionActive;
+    state.routeSelectionActive = false;
+    dom.app?.classList.remove("is-selecting-route");
+    dom.routePickerBar?.classList.add("is-hidden");
+    syncMarkerDragState();
+    syncRouteMarkerSelection();
+
+    if (reopen && (wasSelecting || state.routeDraft) && state.operator) {
+      state.maintenanceView = "route";
+      openMaintenancePanel({ preserve: true });
+    }
+  }
+
+  function toggleRouteClient(client) {
+    if (!client?.id || !state.routeDraft) return;
+    const ids = state.routeDraft.clientIds;
+    const index = ids.indexOf(client.id);
+    if (index >= 0) {
+      ids.splice(index, 1);
+    } else {
+      ids.push(client.id);
+    }
+
+    renderRouteDraftStops();
+    syncRouteMarkerSelection();
+  }
+
+  function syncRouteMarkerSelection() {
+    const selectedIds = state.routeDraft?.clientIds || [];
+    const selected = new Set(selectedIds);
+    for (const [clientId, marker] of state.markerById) {
+      const pin = marker?.getElement?.()?.querySelector(".client-marker");
+      if (!pin) continue;
+      const order = selectedIds.indexOf(clientId);
+      const isSelected = selected.has(clientId);
+      pin.classList.toggle("is-route-selected", isSelected);
+      if (isSelected) {
+        pin.dataset.routeOrder = String(order + 1);
+      } else {
+        delete pin.dataset.routeOrder;
+      }
+    }
+  }
+
+  async function saveRouteDraft(event) {
+    event.preventDefault();
+    if (!state.supabaseClient || !canManageClients()) return;
+
+    readRouteDraftFields();
+    const draft = state.routeDraft;
+    const clients = getRouteDraftClients();
+    if (!draft?.title) {
+      setRouteFormError("Informe um nome para a rota.");
+      dom.maintenanceRouteTitle.focus();
+      return;
+    }
+    if (!clients.length) {
+      setRouteFormError("Selecione ao menos um cliente no mapa.");
+      return;
+    }
+
+    setRouteFormError("");
+    dom.maintenanceRouteSubmit.disabled = true;
+    dom.maintenanceRoutePick.disabled = true;
+    dom.maintenanceRouteSubmit.textContent = "Salvando roteiro...";
+
+    try {
+      const { data: routeData, error: routeError } = await state.supabaseClient
+        .schema(CONFIG.SCHEMA_NAME)
+        .rpc("criar_rota_visita", {
+          p_titulo: draft.title,
+          p_data_planejada: draft.plannedDate || null,
+          p_observacao: draft.notes || null
+        });
+      if (routeError) throw routeError;
+
+      const routeId = cleanValue(routeData?.[0]?.rota_id);
+      if (!routeId) throw new Error("A rota nao foi retornada pelo Supabase.");
+
+      const { error: stopsError } = await state.supabaseClient
+        .schema(CONFIG.SCHEMA_NAME)
+        .rpc("definir_paradas_rota", {
+          p_rota_id: routeId,
+          p_paradas: clients.map((client) => ({ cliente_id: client.id }))
+        });
+      if (stopsError) throw stopsError;
+
+      await loadVisitRoutes();
+      state.routeDraft = null;
+      state.maintenanceView = "home";
+      renderMaintenanceSession();
+      showToast("Rota pré-definida salva com sucesso.");
+    } catch (error) {
+      console.error("[Mapa de clientes] Falha ao salvar rota:", error);
+      setRouteFormError(friendlyRouteError(error));
+    } finally {
+      dom.maintenanceRouteSubmit.disabled = !canManageClients();
+      dom.maintenanceRoutePick.disabled = !canManageClients();
+      dom.maintenanceRouteSubmit.textContent = "Salvar rota pré-definida";
+    }
+  }
+
+  async function loadVisitRoutes() {
+    if (!state.supabaseClient || !state.operator) return;
+
+    const { data, error } = await state.supabaseClient
+      .schema(CONFIG.SCHEMA_NAME)
+      .from("vw_rotas_visitas")
+      .select("rota_id, titulo, data_planejada, status, total_paradas, paradas_visitadas, paradas_pendentes, criado_em")
+      .order("data_planejada", { ascending: true, nullsFirst: false })
+      .order("criado_em", { ascending: false })
+      .limit(12);
+
+    if (error) {
+      console.warn("[Mapa de clientes] Falha ao carregar rotas:", error);
+      state.visitRoutes = [];
+      state.visitRoutesError = error;
+      return;
+    }
+
+    state.visitRoutes = Array.isArray(data) ? data : [];
+    state.visitRoutesError = null;
+  }
+
+  function renderSavedVisitRoutes() {
+    const routes = state.visitRoutes || [];
+    dom.maintenanceRoutesSavedCount.textContent = formatNumber(routes.length);
+    dom.maintenanceRoutesSavedList.replaceChildren();
+
+    if (state.visitRoutesError) {
+      const unavailable = document.createElement("p");
+      unavailable.className = "route-stop-empty";
+      unavailable.textContent = "Execute o SQL de rotas e visitas para habilitar os roteiros salvos.";
+      dom.maintenanceRoutesSavedList.appendChild(unavailable);
+      return;
+    }
+
+    if (!routes.length) {
+      const empty = document.createElement("p");
+      empty.className = "route-stop-empty";
+      empty.textContent = "Nenhuma rota pré-definida foi salva ainda.";
+      dom.maintenanceRoutesSavedList.appendChild(empty);
+      return;
+    }
+
+    routes.forEach((route) => {
+      const item = document.createElement("article");
+      item.className = "saved-route-item";
+      const copy = document.createElement("div");
+      const title = document.createElement("strong");
+      title.textContent = cleanValue(route.titulo) || "Rota sem titulo";
+      const meta = document.createElement("small");
+      const date = cleanValue(route.data_planejada);
+      const stopCount = Number(route.total_paradas) || 0;
+      meta.textContent = [
+        date ? `Planejada: ${formatRouteDate(date)}` : "Sem data planejada",
+        `${formatNumber(stopCount)} ${stopCount === 1 ? "parada" : "paradas"}`
+      ].join(" • ");
+      copy.append(title, meta);
+
+      const status = document.createElement("span");
+      status.className = "saved-route-status";
+      status.textContent = formatRouteStatus(route.status);
+      item.append(copy, status);
+      dom.maintenanceRoutesSavedList.appendChild(item);
+    });
+  }
+
+  function setRouteFormError(message) {
+    dom.maintenanceRouteError.textContent = message || "";
+    dom.maintenanceRouteError.classList.toggle("is-hidden", !message);
+  }
+
+  function friendlyRouteError(error) {
+    const message = String(error?.message || error || "");
+    if (/relation|function|schema cache|not found/i.test(message)) {
+      return "O módulo de rotas ainda não está no banco. Execute o SQL de rotas e visitas e aguarde alguns segundos.";
+    }
+    return message || "Não foi possível salvar a rota.";
+  }
+
+  function formatRouteDate(value) {
+    const match = String(value || "").match(/^(\d{4})-(\d{2})-(\d{2})$/);
+    if (!match) return String(value || "");
+    return `${match[3]}/${match[2]}/${match[1]}`;
+  }
+
+  function formatRouteStatus(value) {
+    const labels = {
+      RASCUNHO: "Rascunho",
+      PLANEJADA: "Planejada",
+      EM_ANDAMENTO: "Em andamento",
+      CONCLUIDA: "Concluída",
+      CANCELADA: "Cancelada"
+    };
+    return labels[cleanValue(value).toUpperCase()] || "Rota";
   }
 
   function beginNewClientFlow() {
@@ -2376,7 +2777,8 @@
       Boolean(state.searchQuery) ||
       Boolean(state.filters.uf) ||
       Boolean(state.filters.municipio) ||
-      Boolean(state.filters.situacao);
+      Boolean(state.filters.situacao) ||
+      Boolean(state.filters.operacao);
 
     syncAreaSelectionUi();
 
@@ -3082,7 +3484,12 @@
     const parts = [
       state.filters.uf ? `UF ${state.filters.uf}` : "",
       state.filters.municipio || "",
-      state.filters.situacao || ""
+      state.filters.situacao || "",
+      state.filters.operacao === "NOVOS"
+        ? "Novos cadastros"
+        : state.filters.operacao === "REPOSICIONADOS"
+          ? "Pontos reposicionados"
+          : ""
     ].filter(Boolean);
 
     return parts.length ? parts.join(" / ") : "Base completa";
@@ -3300,7 +3707,9 @@
       populateFilterOptions();
       restoreFilterControls();
       refreshMunicipioOptions();
-      applyFilters({ fit: true });
+      if (!applySharedClientLink()) {
+        applyFilters({ fit: true });
+      }
 
       const validCoordinates = state.clients.filter((client) => client.hasValidCoordinates).length;
       const invalidCoordinates = state.clients.length - validCoordinates;
@@ -3413,6 +3822,7 @@
         : revisao > 1
           ? "ATUALIZADO"
           : "BASE_ORIGINAL");
+    const reposicionadoEm = cleanValue(raw.reposicionado_em);
 
     const hasValidCoordinates =
       Number.isFinite(latitude) &&
@@ -3478,6 +3888,7 @@
       origemRegistro,
       revisao,
       classificacaoRegistro,
+      reposicionadoEm,
       latitude,
       longitude,
       visualLatitude: latitude,
@@ -3487,6 +3898,7 @@
       hasVisualOffset: false,
       geocodeStatus,
       coordinateKey,
+      hasConfirmedLocation,
       hasValidCoordinates,
       searchable,
       raw
@@ -3592,19 +4004,21 @@
     for (const client of state.clients) {
       if (!client.hasValidCoordinates) continue;
 
+      const routeOrder = (state.routeDraft?.clientIds || []).indexOf(client.id) + 1;
       const statusClass = [
         normalizeSearchText(client.situacao) === "ativa" ? "" : "is-inactive",
         client.classificacaoRegistro === "NOVO"
           ? "is-new"
           : client.classificacaoRegistro === "ATUALIZADO"
             ? "is-updated"
-            : ""
+            : "",
+        state.routeDraft?.clientIds?.includes(client.id) ? "is-route-selected" : ""
       ].filter(Boolean).join(" ");
       const markerRecordLabel = getRecordClassificationLabel(client);
 
       const icon = L.divIcon({
         className: "client-marker-icon",
-        html: `<div class="client-marker ${statusClass}" aria-hidden="true"></div>`,
+        html: `<div class="client-marker ${statusClass}" data-route-order="${routeOrder || ""}" aria-hidden="true"></div>`,
         iconSize: [markerSize, markerSize],
         iconAnchor: [markerAnchor, markerAnchor]
       });
@@ -3631,7 +4045,7 @@
   }
 
   function syncMarkerDragState() {
-    const draggable = canManageClients() && !state.pendingRelocation;
+    const draggable = canManageClients() && !state.pendingRelocation && !state.routeSelectionActive;
 
     for (const marker of state.markerById.values()) {
       if (!marker?.dragging) continue;
@@ -3889,6 +4303,10 @@
 
   function handleMarkerClick(client, event) {
     if (state.pendingRelocation) return;
+    if (state.routeSelectionActive) {
+      toggleRouteClient(client);
+      return;
+    }
     if (state.locationPickerActive) {
       handleLocationPickerClick(event);
       return;
@@ -3946,6 +4364,10 @@
   }
 
   function handleClusterClick(event) {
+    if (state.routeSelectionActive) {
+      showToast("Aproxime o mapa para selecionar clientes individuais nesta rota.");
+      return;
+    }
     const cluster = event.layer;
     if (!cluster || typeof cluster.getAllChildMarkers !== "function") return;
 
@@ -4095,6 +4517,7 @@
     if (!state.searchFocusClientId && searchIntent?.type !== "client") return;
 
     state.searchQuery = "";
+    clearSharedClientLink();
     state.searchFocusClientId = "";
     state.searchResultIndex = -1;
     state.lastSearchFitKey = "";
@@ -4134,6 +4557,14 @@
       ? state.filters.situacao
       : "";
     state.filters.situacao = dom.filterSituacao.value;
+
+    dom.filterOperacao.value = optionExists(
+      dom.filterOperacao,
+      state.filters.operacao
+    )
+      ? state.filters.operacao
+      : "";
+    state.filters.operacao = dom.filterOperacao.value;
   }
 
   function refreshMunicipioOptions() {
@@ -4346,6 +4777,7 @@
       ) {
         return false;
       }
+      if (!matchesOperationalFilter(client)) return false;
       if (state.areaSelection && !isClientInsideAreaSelection(client)) return false;
       if (query && !matchesSearchIntent(client, query, searchIntent)) return false;
       return true;
@@ -5145,6 +5577,7 @@
   }
 
   function handleSearchInput(event) {
+    clearSharedClientLink();
     state.searchQuery = event.target.value.trim();
     state.searchFocusClientId = "";
     state.searchIntentOverride = null;
@@ -5254,8 +5687,24 @@
       ) {
         return false;
       }
+      if (!matchesOperationalFilter(client)) return false;
       return true;
     });
+  }
+
+  function matchesOperationalFilter(client) {
+    if (state.filters.operacao === "NOVOS") {
+      return client.classificacaoRegistro === "NOVO";
+    }
+
+    if (state.filters.operacao === "REPOSICIONADOS") {
+      return Boolean(client.reposicionadoEm) || (
+        client.classificacaoRegistro !== "NOVO" &&
+        client.hasConfirmedLocation
+      );
+    }
+
+    return true;
   }
 
   function buildStateSuggestions(pool, lookupQuery) {
@@ -5650,6 +6099,7 @@
     const intent = suggestion?.intent;
     if (!intent) return;
 
+    clearSharedClientLink();
     state.searchIntentOverride = intent;
     state.searchQuery = suggestion.inputValue || suggestion.label;
     state.searchFocusClientId = intent.type === "client" ? intent.client.id : "";
@@ -5899,6 +6349,7 @@
     const address = formatAddress(client);
     dom.copyAddressClient.disabled = !address;
     dom.copyMapsClient.disabled = !mapsUrl;
+    dom.shareClientLink.disabled = !client?.id;
   }
 
   function closeClientPanel() {
@@ -6003,6 +6454,82 @@
     await copyTextToClipboard(mapsUrl, "Link do Maps copiado.");
   }
 
+  async function shareSelectedClientLink() {
+    const client = state.selectedClient;
+    if (!client?.id) return;
+
+    const url = buildClientShareUrl(client);
+    const shareData = {
+      title: `${client.displayName} | Mapa de clientes MHS`,
+      text: [client.displayName, formatAddress(client)].filter(Boolean).join(" - "),
+      url
+    };
+
+    if (navigator.share) {
+      try {
+        await navigator.share(shareData);
+        showToast("Link do cliente enviado.");
+        return;
+      } catch (error) {
+        if (error?.name === "AbortError") return;
+        console.warn("[Mapa de clientes] Compartilhamento nativo indisponivel:", error);
+      }
+    }
+
+    await copyTextToClipboard(url, "Link exclusivo do cliente copiado.");
+  }
+
+  function buildClientShareUrl(client) {
+    const url = new URL(window.location.href);
+    url.searchParams.set("cliente", client.id);
+    url.searchParams.set("app_version", APP_VERSION);
+    return url.toString();
+  }
+
+  function getSharedClientId() {
+    return readUrlParam(window.location.href, "cliente");
+  }
+
+  function applySharedClientLink() {
+    const clientId = getSharedClientId();
+    if (!clientId) return false;
+
+    const client = getClientById(clientId);
+    if (!client) {
+      showToast("O cliente deste link nao foi encontrado na base atual.");
+      return false;
+    }
+
+    state.filters.uf = "";
+    state.filters.municipio = "";
+    state.filters.situacao = "";
+    state.filters.operacao = "";
+    state.searchQuery = client.displayName;
+    state.searchFocusClientId = client.id;
+    state.searchIntentOverride = { type: "client", client };
+    state.searchResultIndex = -1;
+    state.lastSearchFitKey = "";
+    dom.searchInput.value = client.displayName;
+    dom.clearSearch.classList.remove("is-hidden");
+    restoreFilterControls();
+    refreshMunicipioOptions();
+    hideSearchResults();
+    applyFilters({ fit: false });
+    openClient(client, { focusMap: true });
+    return true;
+  }
+
+  function clearSharedClientLink() {
+    try {
+      const url = new URL(window.location.href);
+      if (!url.searchParams.has("cliente")) return;
+      url.searchParams.delete("cliente");
+      window.history.replaceState(window.history.state, "", url.toString());
+    } catch {
+      // A interacao do mapa continua quando a URL nao puder ser atualizada.
+    }
+  }
+
   async function copyTextToClipboard(text, successMessage) {
     try {
       if (navigator.clipboard && window.isSecureContext) {
@@ -6071,12 +6598,15 @@
   }
 
   function resetFilters() {
+    clearSharedClientLink();
     state.filters.uf = "";
     state.filters.municipio = "";
     state.filters.situacao = "";
+    state.filters.operacao = "";
 
     dom.filterUf.value = "";
     dom.filterSituacao.value = "";
+    dom.filterOperacao.value = "";
     refreshMunicipioOptions();
     dom.filterMunicipio.value = "";
 
@@ -6243,7 +6773,12 @@
         state.filters = {
           uf: cleanValue(saved.filters.uf) || "",
           municipio: cleanValue(saved.filters.municipio) || "",
-          situacao: cleanValue(saved.filters.situacao) || ""
+          situacao: cleanValue(saved.filters.situacao) || "",
+          operacao: ["NOVOS", "REPOSICIONADOS"].includes(
+            cleanValue(saved.filters.operacao)
+          )
+            ? cleanValue(saved.filters.operacao)
+            : ""
         };
       }
     } catch {
